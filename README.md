@@ -76,7 +76,7 @@ This project is currently under active development as a prototype for academic a
     ```bash
     cd Sci-git.ai
 
-3. Install dependencies:
+3. Install dependencies (to be updated):
     ```bash
     pip install -r requirements.txt
 
