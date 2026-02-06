@@ -17,7 +17,7 @@ class DBHandler:
             analysis_json TEXT,
             parent_id INTEGER,
             branch_name TEXT,
-            researcher_name TEXT DEFAULT "ANONYMOUS",
+            researcher_name TEXT DEFAULT 'ANONYMOUS',
             notes TEXT,
             temperature TEXT,
             sample_id TEXT,
