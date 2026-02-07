@@ -3,9 +3,11 @@ import os
 import json
 import pandas as pd
 import threading
+import shutil
+import sys
 from queue import Queue
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, simpledialog
 
 # Internal Modules
 from settings import UITheme
@@ -38,11 +40,11 @@ except:
 # --- APP STATES ---
 STATE_SPLASH = "SPLASH"
 STATE_DASHBOARD = "DASHBOARD"
-current_state = STATE_SPLASH
 STATE_ONBOARDING = "ONBOARDING"
+current_state = STATE_SPLASH
 
 # --- SYSTEM COMPONENTS ---
-db = None # Initialized per-selection
+db = None 
 ai_engine = ScienceAI()
 tree_ui = VersionTree()
 event_queue = Queue()
@@ -67,8 +69,10 @@ btn_confirm = Button(BTN_X, 520, BTN_WIDTH, 45, "ENTER LABORATORY", (0, 180, 100
 # Dashboard Buttons
 btn_export = Button(850, 640, 180, 40, "GENERATE REPORT", UITheme.ACCENT_ORANGE)
 btn_branch = Button(1050, 640, 180, 40, "NEW BRANCH", UITheme.NODE_BRANCH)
+btn_snapshot_export = Button(1050, 20, 160, 35, "EXPORT PROJECT", (50, 50, 60))
 btn_add_manual = Button(0, 0, 32, 32, "+", UITheme.ACCENT_ORANGE) 
 btn_edit_meta = Button(0, 0, 32, 32, "i", UITheme.NODE_MAIN)
+btn_save_meta = Button(855, 500, 390, 40, "SAVE TO SNAPSHOT", (0, 150, 255))
 
 btn_skip_onboarding = Button(1150, 20, 100, 35, "SKIP >>", UITheme.TEXT_DIM)
 btn_onboard_upload = Button(SCREEN_CENTER_X - 150, 450, 300, 50, "UPLOAD FIRST EXPERIMENT", UITheme.ACCENT_ORANGE)
@@ -91,6 +95,34 @@ def init_project(path):
     for folder in ["data", "exports", "logs"]:
         os.makedirs(os.path.join(path, folder), exist_ok=True)
 
+def load_database_safe(path):
+    """SAFE DB SWAPPING: Closes old connection before opening new one."""
+    global db
+    if db:
+        try:
+            db.close()
+        except:
+            pass
+    db = DBHandler(path)
+
+def export_project_worker(project_path):
+    """Zips the DB and Data folder for sharing."""
+    try:
+        state.is_processing = True
+        state.status_msg = "COMPRESSING PROJECT SNAPSHOT..."
+        # Create a timestamped zip
+        ts = pd.Timestamp.now().strftime("%Y%m%d_%H%M")
+        zip_name = f"SciGit_Export_{ts}"
+        output_path = os.path.join(project_path, "exports", zip_name) 
+        
+        # Zip the whole project folder
+        shutil.make_archive(output_path, 'zip', project_path)
+        state.status_msg = f"EXPORT COMPLETE: {zip_name}.zip"
+    except Exception as e:
+        state.status_msg = f"EXPORT FAILED: {str(e)}"
+    finally:
+        state.is_processing = False
+
 # ------------------------------------------------------------------
 # BACKGROUND WORKERS
 # ------------------------------------------------------------------
@@ -108,11 +140,11 @@ def process_new_file_worker(file_path, parent_id, branch):
             state.status_msg = "FILE ALREADY TRACKED. SELECTING SNAPSHOT."
         else:
             analysis_data = ai_engine.analyze_csv_data(file_path)
-            new_id = db.add_experiment(os.path.basename(file_path), file_path, analysis_data.dict(), parent_id, branch)
+            new_id = db.add_experiment(os.path.basename(file_path), file_path, analysis_data.model_dump(), parent_id, branch)
             if new_id:
                 state.head_id = new_id
                 state.selected_id = new_id
-                state.current_analysis = analysis_data.dict()
+                state.current_analysis = analysis_data.model_dump()
                 df = pd.read_csv(file_path)
                 state.current_plot = create_seaborn_surface(df)
                 state.needs_tree_update = True
@@ -121,22 +153,30 @@ def process_new_file_worker(file_path, parent_id, branch):
         state.status_msg = f"ERROR: {str(e)}"
     finally:
         state.is_processing = False
-        state.needs_tree_update = True # Always refresh UI to clear bugs
+        state.needs_tree_update = True 
 
 def load_experiment_worker(exp_id):
     try:
         state.is_processing = True
         raw = db.get_experiment_by_id(exp_id)
         if raw:
+            # Load basic data
             state.current_analysis = json.loads(raw[4])
             df = pd.read_csv(raw[3])
             state.current_plot = create_seaborn_surface(df)
             state.status_msg = f"LOADED: {raw[2]}"
-            # Load metadata into buffers
+            
+            # Load metadata into buffers safely
             global meta_input_notes, meta_input_temp, meta_input_sid
-            meta_input_notes = raw[7] if raw[7] else ""
-            meta_input_temp = raw[8] if raw[8] else ""
-            meta_input_sid = raw[9] if raw[9] else ""
+            # Check indices based on your schema. 
+            # Assuming: 0:id, ... 7:notes, 8:temp, 9:sid OR 8:notes, 9:temp, 10:sid depending on schema version.
+            # We use negative indexing for safety if schema grew.
+            # Assuming DBHandler.create_tables schema:
+            # notes, temperature, sample_id are the last 3 columns.
+            meta_input_notes = raw[-3] if raw[-3] else ""
+            meta_input_temp = raw[-2] if raw[-2] else ""
+            meta_input_sid = raw[-1] if raw[-1] else ""
+            
     except Exception as e:
         state.status_msg = "FAILED TO LOAD DATA."
     finally:
@@ -154,6 +194,103 @@ while running:
         if event.type == pygame.QUIT:
             running = False
         
+        # --- GLOBAL MOUSE CLICKS ---
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            
+            # 1. SPLASH SCREEN EVENTS
+            if current_state == STATE_SPLASH:
+                if not show_login_box:
+                    if btn_new.check_hover(mouse_pos):
+                        path = filedialog.askdirectory(title="Select Folder for New Project")
+                        if path:
+                            selected_project_path = path
+                            init_project(path)
+                            load_database_safe(os.path.join(path, "project_vault.db"))
+                            show_login_box = True
+
+                    elif btn_load.check_hover(mouse_pos):
+                        path = filedialog.askdirectory(title="Open Existing Sci-Git Folder")
+                        if path:
+                            db_path = os.path.join(path, "project_vault.db")
+                            if os.path.exists(db_path):
+                                selected_project_path = path
+                                load_database_safe(db_path)
+                                show_login_box = True
+                            else:
+                                messagebox.showwarning("Project Not Found", "This folder doesn't contain a Sci-Git database.")
+
+                    elif btn_import.check_hover(mouse_pos):
+                        file_path = filedialog.askopenfilename(title="Open Portable Snapshot", filetypes=[("Sci-Git Database", "*.db")])
+                        if file_path:
+                            selected_project_path = os.path.dirname(file_path)
+                            load_database_safe(file_path)
+                            show_login_box = True
+                else:
+                    # Login Confirm
+                    if btn_confirm.check_hover(mouse_pos):
+                        if len(researcher_name) >= 2:
+                            watcher = start_watcher(os.path.join(selected_project_path, "data"), event_queue)
+                            tree_data = db.get_tree_data()
+                            if not tree_data:
+                                current_state = STATE_ONBOARDING
+                            else:
+                                tree_ui.update_tree(tree_data)
+                                current_state = STATE_DASHBOARD
+
+            # 2. ONBOARDING EVENTS
+            elif current_state == STATE_ONBOARDING:
+                if btn_onboard_upload.check_hover(mouse_pos):
+                    path = filedialog.askopenfilename(title="Select Initial Data", filetypes=[("CSV", "*.csv")])
+                    if path:
+                        threading.Thread(target=process_new_file_worker, args=(path, None, "main"), daemon=True).start()
+                        current_state = STATE_DASHBOARD
+                elif btn_skip_onboarding.check_hover(mouse_pos):
+                    current_state = STATE_DASHBOARD
+
+            # 3. DASHBOARD EVENTS
+            elif current_state == STATE_DASHBOARD:
+                if state.selected_id and btn_add_manual.check_hover(mouse_pos):
+                    path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv")])
+                    if path: threading.Thread(target=process_new_file_worker, args=(path, state.selected_id, state.active_branch), daemon=True).start()
+                
+                elif state.selected_id and btn_edit_meta.check_hover(mouse_pos):
+                    is_editing_metadata = not is_editing_metadata
+                
+                elif is_editing_metadata and btn_save_meta.check_hover(mouse_pos):
+                    db.update_metadata(state.selected_id, meta_input_notes, meta_input_temp, meta_input_sid)
+                    is_editing_metadata = False
+                    threading.Thread(target=load_experiment_worker, args=(state.selected_id,), daemon=True).start()
+                
+                elif btn_snapshot_export.check_hover(mouse_pos):
+                    threading.Thread(target=export_project_worker, args=(selected_project_path,), daemon=True).start()
+
+                elif btn_branch.check_hover(mouse_pos):
+                    # Ask for new branch name
+                    new_branch = simpledialog.askstring("New Branch", "Enter new branch name:")
+                    if new_branch:
+                        state.active_branch = new_branch
+                        state.status_msg = f"SWITCHED TO BRANCH: {new_branch}"
+
+                elif btn_export.check_hover(mouse_pos):
+                    if state.current_analysis:
+                        path = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF", "*.pdf")])
+                        if path:
+                            # Ensure processor.py is present and working
+                            try:
+                                export_to_report(path, state.current_analysis, state.active_branch)
+                                state.status_msg = "REPORT GENERATED SUCCESSFULLY."
+                            except Exception as e:
+                                state.status_msg = f"REPORT FAILED: {str(e)}"
+                    else:
+                        state.status_msg = "SELECT AN EXPERIMENT FIRST."
+
+                else:
+                    # Tree Interaction
+                    cid = tree_ui.handle_click(event.pos, (20, 80, 800, 600))
+                    if cid:
+                        state.selected_id = cid
+                        threading.Thread(target=load_experiment_worker, args=(cid,), daemon=True).start()
+
         # Keyboard Routing
         if event.type == pygame.KEYDOWN:
             if current_state == STATE_SPLASH and show_login_box:
@@ -173,42 +310,28 @@ while running:
                         elif active_field == "temp": meta_input_temp += event.unicode
                         elif active_field == "sid": meta_input_sid += event.unicode
 
-    # --- SCREEN: SPLASH (Project Selection) ---
+        # Dashboard Pan/Zoom
+        if current_state == STATE_DASHBOARD:
+            if event.type == pygame.MOUSEWHEEL: tree_ui.handle_zoom("in" if event.y > 0 else "out")
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 2: tree_ui.is_panning = True
+            if event.type == pygame.MOUSEBUTTONUP and event.button == 2: tree_ui.is_panning = False
+            if event.type == pygame.MOUSEMOTION and tree_ui.is_panning: tree_ui.camera_offset += pygame.Vector2(event.rel)
+
+    # --- DRAWING LOOPS ---
     if current_state == STATE_SPLASH:
         screen.fill(UITheme.BG_LOGIN)
-        if logo_img:
-            screen.blit(logo_img, logo_img.get_rect(center=(SCREEN_CENTER_X, 230)))
+        if logo_img: screen.blit(logo_img, logo_img.get_rect(center=(SCREEN_CENTER_X, 230)))
         
         if not show_login_box:
-            for btn in [btn_new, btn_load, btn_import]:
-                btn.draw(screen, font_main)
-                if btn.check_hover(mouse_pos) and pygame.mouse.get_pressed()[0]:
-                    
-                    if btn.text == "CREATE NEW PROJECT":
-                        path = filedialog.askdirectory(title="Select Folder for New Project")
-                        if path:
-                            selected_project_path = path
-                            init_project(path)
-                            db = DBHandler(os.path.join(path, "project_vault.db"))
-                            show_login_box = True
-
-                    elif btn.text == "CONTINUE PROJECT":
-                        path = filedialog.askdirectory(title="Open Existing Sci-Git Folder")
-                        if path:
-                            db_path = os.path.join(path, "project_vault.db")
-                            if os.path.exists(db_path):
-                                selected_project_path = path
-                                db = DBHandler(db_path)
-                                show_login_box = True
-                            else:
-                                messagebox.showwarning("Project Not Found", "This folder doesn't contain a Sci-Git database.")
-
-                    elif btn.text == "UPLOAD PROJECT":
-                        file_path = filedialog.askopenfilename(title="Open Portable Snapshot", filetypes=[("Sci-Git Database", "*.db")])
-                        if file_path:
-                            selected_project_path = os.path.dirname(file_path)
-                            db = DBHandler(file_path)
-                            show_login_box = True
+            # Visual Updates
+            btn_new.check_hover(mouse_pos)
+            btn_new.draw(screen, font_main)
+            
+            btn_load.check_hover(mouse_pos)
+            btn_load.draw(screen, font_main)
+            
+            btn_import.check_hover(mouse_pos)
+            btn_import.draw(screen, font_main)
         else:
             # Login/Identity Box
             box_rect = pygame.Rect(SCREEN_CENTER_X - 225, 380, 450, 240)
@@ -221,51 +344,26 @@ while running:
             pygame.draw.rect(screen, UITheme.ACCENT_ORANGE, input_rect, 2)
             screen.blit(font_bold.render(researcher_name + "|", True, (255, 255, 255)), (input_rect.x + 10, input_rect.y + 12))
             
+            btn_confirm.check_hover(mouse_pos)
             btn_confirm.draw(screen, font_main)
-            if btn_confirm.check_hover(mouse_pos) and pygame.mouse.get_pressed()[0]:
-                if len(researcher_name) >= 2:
-                    watcher = start_watcher(os.path.join(selected_project_path, "data"), event_queue)
-                    
-                    # Check if project is empty
-                    tree_data = db.get_tree_data()
-                    if not tree_data:
-                        current_state = STATE_ONBOARDING
-                    else:
-                        tree_ui.update_tree(tree_data)
-                        current_state = STATE_DASHBOARD
 
     elif current_state == STATE_ONBOARDING:
         screen.fill(UITheme.BG_DARK)
         UITheme.draw_grid(screen)
-        
-        # Draw Logo at top
-        if logo_img:
-            screen.blit(logo_img, logo_img.get_rect(center=(SCREEN_CENTER_X, 200)))
-            
-        # Instructional Text
+        if logo_img: screen.blit(logo_img, logo_img.get_rect(center=(SCREEN_CENTER_X, 200)))
         msg1 = font_header.render("WELCOME TO THE LAB", True, (255, 255, 255))
         msg2 = font_bold.render("To begin, please upload your first experimental CSV file.", True, UITheme.TEXT_DIM)
         screen.blit(msg1, (SCREEN_CENTER_X - msg1.get_width()//2, 320))
         screen.blit(msg2, (SCREEN_CENTER_X - msg2.get_width()//2, 370))
         
-        # Primary Action Button
+        btn_onboard_upload.check_hover(mouse_pos)
         btn_onboard_upload.draw(screen, font_main)
-        if btn_onboard_upload.check_hover(mouse_pos) and pygame.mouse.get_pressed()[0]:
-            path = filedialog.askopenfilename(title="Select Initial Data", filetypes=[("CSV", "*.csv")])
-            if path:
-                # Trigger existing worker logic (Functionality Preserved!)
-                threading.Thread(target=process_new_file_worker, 
-                                args=(path, None, "main"), 
-                                daemon=True).start()
-                current_state = STATE_DASHBOARD
-
-        # Skip Button
+        
+        btn_skip_onboarding.check_hover(mouse_pos)
         btn_skip_onboarding.draw(screen, font_main)
-        if btn_skip_onboarding.check_hover(mouse_pos) and pygame.mouse.get_pressed()[0]:
-            current_state = STATE_DASHBOARD
 
-    # --- SCREEN: DASHBOARD ---
     elif current_state == STATE_DASHBOARD:
+        # Check Watcher Queue
         if not event_queue.empty() and not state.is_processing:
             ev = event_queue.get()
             if ev["type"] == "NEW_FILE":
@@ -275,26 +373,7 @@ while running:
             tree_ui.update_tree(db.get_tree_data())
             state.needs_tree_update = False
 
-        for event in events:
-            if event.type == pygame.MOUSEWHEEL: tree_ui.handle_zoom("in" if event.y > 0 else "out")
-            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 2: tree_ui.is_panning = True
-            if event.type == pygame.MOUSEBUTTONUP and event.button == 2: tree_ui.is_panning = False
-            if event.type == pygame.MOUSEMOTION and tree_ui.is_panning: tree_ui.camera_offset += pygame.Vector2(event.rel)
-
-            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                # Tree Menu Clicks
-                if state.selected_id and btn_add_manual.check_hover(mouse_pos):
-                    path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv")])
-                    if path: threading.Thread(target=process_new_file_worker, args=(path, state.selected_id, state.active_branch), daemon=True).start()
-                elif state.selected_id and btn_edit_meta.check_hover(mouse_pos):
-                    is_editing_metadata = not is_editing_metadata
-                else:
-                    cid = tree_ui.handle_click(event.pos, (20, 80, 800, 600))
-                    if cid:
-                        state.selected_id = cid
-                        threading.Thread(target=load_experiment_worker, args=(cid,), daemon=True).start()
-
-        # Rendering Dashboard
+        # Rendering
         screen.fill(UITheme.BG_DARK)
         UITheme.draw_grid(screen)
         
@@ -316,9 +395,14 @@ while running:
                 if node["id"] == state.selected_id:
                     pos = (node["pos"] * tree_ui.zoom_level) + tree_ui.camera_offset
                     mx, my = pos.x + 45, pos.y + 60
+                    # Update buttons position
                     btn_add_manual.rect.topleft = (mx, my)
                     btn_edit_meta.rect.topleft = (mx, my + 40)
+                    
+                    btn_add_manual.check_hover(mouse_pos)
                     btn_add_manual.draw(screen, font_main)
+                    
+                    btn_edit_meta.check_hover(mouse_pos)
                     btn_edit_meta.draw(screen, font_main)
 
         # Right Panel Toggle
@@ -333,6 +417,11 @@ while running:
                 pygame.draw.rect(screen, (50, 50, 55), (850, 100, 400, 300), 1)
             if state.current_analysis:
                 UITheme.render_terminal_text(screen, state.current_analysis.get('summary', ""), (855, 420), font_main, UITheme.TEXT_OFF_WHITE, 390)
+                
+                # Show Metadata if exists
+                meta_txt = f"NOTE: {meta_input_notes}\nTEMP: {meta_input_temp} | ID: {meta_input_sid}"
+                if meta_input_notes or meta_input_temp:
+                    UITheme.render_terminal_text(screen, meta_txt, (855, 550), font_main, UITheme.ACCENT_ORANGE, 390)
         else:
             # --- EDIT MODE: SHOW INPUT BOXES ---
             screen.blit(font_bold.render("MANUAL DATA ENTRY", True, UITheme.ACCENT_ORANGE), (855, 100))
@@ -350,17 +439,22 @@ while running:
                     active_field = key
                 y_ptr += 80
             
-            btn_save = Button(855, 500, 390, 40, "SAVE TO SNAPSHOT", (0, 150, 255))
-            btn_save.draw(screen, font_main)
-            if btn_save.check_hover(mouse_pos) and pygame.mouse.get_pressed()[0]:
-                db.update_metadata(state.selected_id, meta_input_notes, meta_input_temp, meta_input_sid)
-                is_editing_metadata = False
+            btn_save_meta.check_hover(mouse_pos)
+            btn_save_meta.draw(screen, font_main)
 
         # Dashboard Buttons
+        btn_export.check_hover(mouse_pos)
         btn_export.draw(screen, font_main)
+        
+        btn_branch.check_hover(mouse_pos)
         btn_branch.draw(screen, font_main)
+        
+        btn_snapshot_export.check_hover(mouse_pos)
+        btn_snapshot_export.draw(screen, font_main)
+        
         if state.is_processing: draw_loading_overlay(screen, font_bold)
 
     pygame.display.flip()
     clock.tick(60)
 pygame.quit()
+sys.exit()

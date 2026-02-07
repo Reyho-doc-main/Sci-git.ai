@@ -1,0 +1,40 @@
+[project]
+name = "ccds-tech-for-good-2026"
+version = "0.1.0"
+description = "2JC1Poly Submission for the Tech For Good Hackathon"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+# Core utilities: Bare minimum needed to load environment variables
+dependencies = [
+    "pygame-widgets>=1.2.6",
+    "python-dotenv>=1.2.1",
+]
+
+[dependency-groups]
+beautifulsoup = [
+    "beautifulsoup4>=4.14.3",
+]
+# Development & Tooling
+dev = [
+    "ipykernel>=7.1.0",
+]
+
+# Intelligence Stack (LLM & RAG)
+langchain = [
+    "langchain>=1.2.0",
+    "langchain-community>=0.4.1",
+    "langchain-core>=1.2.2",
+    "langchain-openai>=1.1.5",
+    "langchainhub>=0.1.21",
+]
+
+# UI & Visualization Stack
+pygame = [
+    "pygame>=2.6.1",
+]
+
+# Auto-install everything for participants on 'uv sync'
+[tool.uv]
+default-groups = ["dev", "langchain", "pygame", "beautifulsoup"]
