@@ -1,3 +1,4 @@
+# --- FILE: workers.py ---
 import pygame
 import os
 import json
@@ -53,7 +54,7 @@ class WorkerController:
                         "data": {
                             "plot_data": (plot_bytes, size, context),
                             "analysis": json.loads(raw[4]),
-                            "metadata": {"notes": raw[8]},
+                            "metadata": {"notes": raw[8], "temp": raw[9], "sid": raw[10]},
                             "status": status_note
                         }
                     }
@@ -91,7 +92,10 @@ class WorkerController:
             if existing_id:
                 return self.worker_load_experiment([existing_id])
             
-            analysis_data = self.ai_engine.analyze_csv_data(file_path)
+            # --- PERFORMANCE FIX: Use Placeholder Analysis ---
+            # Don't run full AI here. Just get basic stats.
+            analysis_data = self.ai_engine.get_placeholder_analysis(file_path)
+            
             new_id = self.db.add_experiment(os.path.basename(file_path), file_path, analysis_data.model_dump(), parent_id, branch)
             
             df = pd.read_csv(file_path)
@@ -109,12 +113,47 @@ class WorkerController:
         except Exception as e:
             return {"type": "ERROR", "data": str(e)}
 
+    def worker_analyze_selection(self, node_id):
+        """Manually triggered AI analysis for a specific node using GPT-5-Mini."""
+        try:
+            raw = self.db.get_experiment_by_id(node_id)
+            if not raw: return {"type": "ERROR", "data": "Node not found"}
+            
+            file_path = raw[3]
+            if not os.path.exists(file_path): return {"type": "ERROR", "data": "File missing"}
+            
+            # Check before AI call
+            if state.stop_ai_requested: return {"type": "CANCELLED"}
+            
+            # Run the heavy AI analysis
+            analysis_data = self.ai_engine.analyze_csv_data(file_path, model="gpt-5-mini")
+            
+            # Check after AI call (in case user clicked stop while waiting)
+            if state.stop_ai_requested: return {"type": "CANCELLED"}
+            
+            # Update DB with new analysis
+            with self.db.lock:
+                cursor = self.db.conn.cursor()
+                cursor.execute("UPDATE experiments SET analysis_json = ? WHERE id = ?", (json.dumps(analysis_data.model_dump()), node_id))
+                self.db.conn.commit()
+            
+            return {
+                "type": "ANALYSIS_READY",
+                "data": analysis_data.model_dump()
+            }
+        except Exception as e:
+            return {"type": "ERROR", "data": str(e)}
+
     def worker_analyze_branch(self, branch_name):
         try:
             tree = self.db.get_tree_data()
             branch_nodes = [row for row in tree if row[2] == branch_name]
             history_text = "\n".join([f"ID: {row[0]} | Name: {row[3]}" for row in branch_nodes[-5:]])
+            
+            if state.stop_ai_requested: return {"type": "CANCELLED"}
             report = self.ai_engine.analyze_branch_history(history_text)
+            if state.stop_ai_requested: return {"type": "CANCELLED"}
+            
             return {
                 "type": "ANALYSIS_READY",
                 "data": {"summary": f"BRANCH REPORT ({branch_name}):\n{report}", "anomalies": []}
@@ -153,9 +192,15 @@ class WorkerController:
             df.to_csv(file_path, index=False)
             
             # 3. Reload visualization
+            plot_bytes, size, context = create_seaborn_surface(df)
+            
             return {
                 "type": "SAVE_COMPLETE", 
-                "data": {"node_id": node_id, "status": "VERSION SAVED"}
+                "data": {
+                    "node_id": node_id, 
+                    "status": "VERSION SAVED",
+                    "plot_data": (plot_bytes, size, context)
+                }
             }
         except Exception as e:
             return {"type": "ERROR", "data": str(e)}
@@ -241,13 +286,22 @@ class TaskQueue:
         while not self.result_queue.empty():
             result = self.result_queue.get()
             
+            if result.get("type") == "CANCELLED":
+                # Silently ignore cancelled tasks
+                continue
+
             if result.get("type") == "ERROR":
                 state.status_msg = f"ERROR: {result['data']}"
                 state.is_processing = False
+                state.processing_mode = "NORMAL"
                 continue
 
             msg_type = result.get("type")
             data = result.get("data")
+
+            # Common reset for all success types
+            state.is_processing = False
+            state.processing_mode = "NORMAL"
 
             if msg_type == "LOAD_COMPLETE":
                 if 'plot_data' in data and data['plot_data'][0]:
@@ -258,7 +312,6 @@ class TaskQueue:
                 if 'metadata' in data:
                     state.meta_input_notes = data['metadata'].get('notes', "") or ""
                 if 'status' in data: state.status_msg = data['status']
-                state.is_processing = False
 
             elif msg_type == "NEW_FILE_COMPLETE":
                 state.head_id = data['id']
@@ -269,36 +322,35 @@ class TaskQueue:
                 state.plot_context = ctx
                 state.needs_tree_update = True
                 state.status_msg = data['status']
-                state.is_processing = False
 
             elif msg_type == "CONVERSION_NEEDED":
                 state.pending_conversion = data
                 state.show_conversion_dialog = True
-                state.is_processing = False
 
             elif msg_type == "ANALYSIS_READY":
+                # --- NEW: Trigger Popup instead of silent update ---
                 state.current_analysis = data
+                state.ai_popup_data = data
+                state.show_ai_popup = True
                 state.status_msg = "ANALYSIS COMPLETE"
-                state.is_processing = False
             
             elif msg_type == "EXPORT_COMPLETE":
                 state.status_msg = data
-                state.is_processing = False
 
             elif msg_type == "SAVE_COMPLETE":
-                # Clear Redo stack on new save (divergent history)
                 if 'node_id' in data:
                     state.redo_stack[data['node_id']] = [] 
                 state.status_msg = "VERSION SAVED."
-                state.is_processing = False
+                if 'plot_data' in data and data['plot_data'][0]:
+                    raw, size, ctx = data['plot_data']
+                    state.current_plot = pygame.image.frombuffer(raw, size, "RGBA")
+                    state.plot_context = ctx
 
             elif msg_type == "UNDO_COMPLETE":
                 node_id = data['node_id']
                 if node_id not in state.redo_stack: state.redo_stack[node_id] = []
                 state.redo_stack[node_id].append(data['redo_hash'])
                 state.status_msg = f"UNDO: RESTORED {data['restored_hash'][:8]}"
-                state.is_processing = False
             
             elif msg_type == "REDO_COMPLETE":
                 state.status_msg = f"REDO: RESTORED {data['restored_hash'][:8]}"
-                state.is_processing = False

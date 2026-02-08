@@ -1,3 +1,4 @@
+# --- FILE: main.py ---
 import pygame
 import os
 import sys
@@ -28,8 +29,8 @@ pygame.display.set_caption("SCI-GIT // Research Version Control")
 
 # --- ICON SETUP ---
 try:
-    if os.path.exists("logo.jpg"):
-        icon_surf = pygame.image.load("logo.jpg")
+    if os.path.exists("image/logo.jpg"):
+        icon_surf = pygame.image.load("image/logo.jpg")
         pygame.display.set_icon(icon_surf)
 except Exception as e:
     print(f"Icon load failed: {e}")
@@ -77,6 +78,7 @@ def save_editor_changes():
         state.editor_selected_cell = None
 
     state.status_msg = "SAVING & VERSIONING..."
+    state.processing_mode = "LOCAL"
     
     task_manager.add_task(worker_ctrl.worker_save_editor_changes, [
         state.selected_ids[0], 
@@ -91,6 +93,7 @@ def perform_undo():
     raw = db.get_experiment_by_id(node_id)
     if not raw: return
     state.status_msg = "UNDOING..."
+    state.processing_mode = "LOCAL"
     task_manager.add_task(worker_ctrl.worker_undo, [node_id, raw[3], state.selected_project_path, state.redo_stack.get(node_id, [])])
 
 def perform_redo():
@@ -103,6 +106,7 @@ def perform_redo():
     if not raw: return
     redo_hash = state.redo_stack[node_id].pop()
     state.status_msg = "REDOING..."
+    state.processing_mode = "LOCAL"
     task_manager.add_task(worker_ctrl.worker_redo, [node_id, raw[3], state.selected_project_path, redo_hash])
 
 # ==============================================================================
@@ -117,21 +121,33 @@ while running:
     
     if not state.is_processing:
         if "VERSION SAVED" in state.status_msg or "RESTORED" in state.status_msg:
-             if state.selected_ids:
+             if "RESTORED" in state.status_msg and state.selected_ids:
+                 state.processing_mode = "LOCAL"
                  task_manager.add_task(worker_ctrl.worker_load_experiment, [state.selected_ids])
-                 if "VERSION SAVED" in state.status_msg: state.status_msg = "SAVED."
-                 elif "RESTORED" in state.status_msg: state.status_msg = "READY."
+                 state.status_msg = "READY."
     
     if not event_queue.empty() and not state.is_processing and worker_ctrl:
         ev = event_queue.get()
         if ev["type"] == "NEW_FILE":
+            state.processing_mode = "LOCAL"
             task_manager.add_task(worker_ctrl.worker_process_new_file, [ev["path"], state.head_id, state.active_branch, state.researcher_name])
 
     axis_selector_rect = pygame.Rect(850, 130, 200, 300)
+    search_bar_hitbox = pygame.Rect(850, 45, 200, 20)
 
     for event in events:
         if event.type == pygame.QUIT: running = False
         
+        # --- AI STOP HANDLER ---
+        if state.is_processing and state.processing_mode == "AI":
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if layout.btn_ai_stop.check_hover(mouse_pos):
+                    state.stop_ai_requested = True
+                    state.is_processing = False 
+                    state.processing_mode = "NORMAL"
+                    state.status_msg = "AI ABORTED."
+                    continue 
+
         # --- EDITOR KEYBOARD INPUT ---
         if current_state == STATE_EDITOR and event.type == pygame.KEYDOWN:
             if event.key in [pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT]:
@@ -207,7 +223,26 @@ while running:
                         state.editor_selected_cell = None
 
             elif current_state == STATE_DASHBOARD:
-                if state.show_axis_selector:
+                if search_bar_hitbox.collidepoint(mouse_pos):
+                    state.search_active = True
+                else:
+                    state.search_active = False
+
+                if state.show_ai_popup:
+                    # --- NEW: AI POPUP INTERACTIONS ---
+                    if layout.btn_popup_close.check_hover(mouse_pos):
+                        state.show_ai_popup = False
+                    elif layout.btn_popup_download.check_hover(mouse_pos):
+                        if state.ai_popup_data:
+                            path = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF", "*.pdf")])
+                            if path:
+                                try:
+                                    export_to_report(path, state.ai_popup_data, "AI_SUMMARY_EXPORT")
+                                    state.status_msg = "PDF SAVED."
+                                except Exception as e:
+                                    state.status_msg = f"ERROR: {e}"
+                
+                elif state.show_axis_selector:
                     if not axis_selector_rect.collidepoint(mouse_pos) and not layout.btn_axis_gear.check_hover(mouse_pos):
                         state.show_axis_selector = False
                     elif axis_selector_rect.collidepoint(mouse_pos) and state.plot_context:
@@ -217,6 +252,7 @@ while running:
                         idx = local_y // 25
                         if 0 <= idx < len(numeric_cols):
                             col_name = numeric_cols[idx]
+                            state.processing_mode = "LOCAL"
                             if 850 <= mouse_pos[0] < 950: 
                                 task_manager.add_task(worker_ctrl.worker_load_experiment, [state.selected_ids, col_name, state.plot_context.get('y_col'), True])
                             else:
@@ -225,6 +261,7 @@ while running:
                 elif state.show_conversion_dialog:
                     if layout.btn_conv_yes.check_hover(mouse_pos):
                         file_path, col, unit = state.pending_conversion
+                        state.processing_mode = "LOCAL"
                         task_manager.add_task(worker_ctrl.worker_perform_conversion, [file_path, col, unit, state.selected_ids])
                         state.show_conversion_dialog = False
                     elif layout.btn_conv_no.check_hover(mouse_pos):
@@ -233,18 +270,28 @@ while running:
                 else:
                     # BUTTON CLICKS (Referring to layout object)
                     if layout.btn_menu_analyze.check_hover(mouse_pos):
-                        task_manager.add_task(worker_ctrl.worker_analyze_branch, [state.active_branch])
+                        state.processing_mode = "AI"
+                        if len(state.selected_ids) == 1:
+                            state.status_msg = "ANALYZING FILE (MINI)..."
+                            task_manager.add_task(worker_ctrl.worker_analyze_selection, [state.selected_ids[0]])
+                        else:
+                            state.status_msg = "ANALYZING BRANCH (NANO)..."
+                            task_manager.add_task(worker_ctrl.worker_analyze_branch, [state.active_branch])
                     
                     if layout.btn_menu_edit.check_hover(mouse_pos):
                         if len(state.selected_ids) == 1:
                             raw = db.get_experiment_by_id(state.selected_ids[0])
                             state.editor_file_path = raw[3]
-                            state.editor_df = pd.read_csv(state.editor_file_path)
-                            current_state = STATE_EDITOR
-                            state.editor_selected_cell = None
-                            state.status_msg = "EDITING MODE ACTIVE"
+                            try:
+                                state.editor_df = pd.read_csv(state.editor_file_path)
+                                current_state = STATE_EDITOR
+                                state.editor_selected_cell = None
+                                state.status_msg = "EDITING MODE ACTIVE"
+                            except Exception as e:
+                                state.status_msg = "ERROR OPENING FILE"
 
                     if layout.btn_menu_file.check_hover(mouse_pos):
+                        state.processing_mode = "LOCAL"
                         task_manager.add_task(worker_ctrl.worker_export_project, [state.selected_project_path])
                     
                     if layout.btn_undo.check_hover(mouse_pos):
@@ -258,7 +305,9 @@ while running:
                     
                     if len(state.selected_ids) == 1 and layout.btn_add_manual.check_hover(mouse_pos):
                         path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv")])
-                        if path: task_manager.add_task(worker_ctrl.worker_process_new_file, [path, state.selected_ids[0], state.active_branch, state.researcher_name])
+                        if path: 
+                            state.processing_mode = "LOCAL"
+                            task_manager.add_task(worker_ctrl.worker_process_new_file, [path, state.selected_ids[0], state.active_branch, state.researcher_name])
                     
                     elif len(state.selected_ids) == 1 and layout.btn_edit_meta.check_hover(mouse_pos): 
                         state.is_editing_metadata = not state.is_editing_metadata
@@ -266,9 +315,11 @@ while running:
                     elif state.is_editing_metadata and layout.btn_save_meta.check_hover(mouse_pos):
                         db.update_metadata(state.selected_ids[0], state.meta_input_notes)
                         state.is_editing_metadata = False
+                        state.processing_mode = "LOCAL"
                         task_manager.add_task(worker_ctrl.worker_load_experiment, [state.selected_ids])
                     
                     elif layout.btn_snapshot_export.check_hover(mouse_pos):
+                        state.processing_mode = "LOCAL"
                         task_manager.add_task(worker_ctrl.worker_export_project, [state.selected_project_path])
                     elif layout.btn_branch.check_hover(mouse_pos):
                         new_branch = simpledialog.askstring("New Branch", "Name:")
@@ -294,6 +345,7 @@ while running:
                         else:
                             selected_list = tree_ui.handle_click(event.pos, (20, 80, 800, 600))
                             if selected_list: 
+                                state.processing_mode = "LOCAL"
                                 task_manager.add_task(worker_ctrl.worker_load_experiment, [selected_list])
             
             # SPLASH / ONBOARDING
@@ -333,6 +385,7 @@ while running:
                 if layout.btn_onboard_upload.check_hover(mouse_pos):
                     path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv")])
                     if path:
+                        state.processing_mode = "LOCAL"
                         task_manager.add_task(worker_ctrl.worker_process_new_file, [path, None, "main", state.researcher_name])
                         current_state = STATE_DASHBOARD
                 elif layout.btn_skip_onboarding.check_hover(mouse_pos): current_state = STATE_DASHBOARD
@@ -344,6 +397,7 @@ while running:
                 else: state.researcher_name += event.unicode
             elif state.search_active:
                 if event.key == pygame.K_BACKSPACE: state.search_text = state.search_text[:-1]
+                elif event.key == pygame.K_RETURN: state.search_active = False # Commit search
                 else: state.search_text += event.unicode
                 tree_ui.search_filter = state.search_text
             elif state.is_editing_metadata:

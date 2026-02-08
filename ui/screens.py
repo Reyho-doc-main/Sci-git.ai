@@ -16,12 +16,26 @@ class RenderEngine:
         self.font_header = pygame.font.SysFont("Consolas", 32, bold=True)
         self.font_small = pygame.font.SysFont("Consolas", 10)
         
+        # --- NEW: Image Asset Loading ---
+        self.icons = {}
         try:
-            logo_raw = pygame.image.load("logo.jpg")
+            logo_raw = pygame.image.load("image/logo.jpg")
             self.logo_img = pygame.transform.smoothscale(logo_raw, (400, 300))
             self.logo_img.set_colorkey(self.logo_img.get_at((0,0)))
         except: 
             self.logo_img = None
+            print("Warning: logo.jpg not found.")
+
+        # Load UI Icons (Collapse/Expand/Settings)
+        def load_icon(path, size):
+            if os.path.exists(path):
+                img = pygame.image.load(path).convert_alpha()
+                return pygame.transform.smoothscale(img, size)
+            return None
+
+        self.icons['collapse'] = load_icon("image/collapse.webp", (20, 20))
+        self.icons['expand'] = load_icon("image/expand.png", (20, 20))
+        self.icons['settings'] = load_icon("image/setting_icon.webp", (30, 30))
 
     def draw_splash(self, mouse_pos):
         self.screen.fill(UITheme.BG_LOGIN)
@@ -123,6 +137,80 @@ class RenderEngine:
             b.check_hover(mouse_pos)
             b.draw(self.screen, self.font_bold)
 
+    def draw_ai_loading(self, mouse_pos):
+        """Draws the high-tech AI prompting screen."""
+        overlay = pygame.Surface((1280, 720), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 245))
+        self.screen.blit(overlay, (0,0))
+        
+        UITheme.draw_scanning_lines(self.screen, pygame.time.get_ticks() // 20)
+        
+        l1 = self.font_header.render("ESTABLISHING NEURAL LINK...", True, UITheme.ACCENT_ORANGE)
+        l2 = self.font_bold.render("TRANSMITTING EXPERIMENTAL DATA TO AZURE CLOUD", True, UITheme.TEXT_DIM)
+        
+        self.screen.blit(l1, (SCREEN_CENTER_X - l1.get_width()//2, 300))
+        self.screen.blit(l2, (SCREEN_CENTER_X - l2.get_width()//2, 350))
+        
+        layout.btn_ai_stop.check_hover(mouse_pos)
+        layout.btn_ai_stop.draw(self.screen, self.font_bold)
+
+    def draw_ai_popup(self, mouse_pos):
+        """Draws the AI Analysis Result Popup."""
+        # Dim background
+        overlay = pygame.Surface((1280, 720), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 200))
+        self.screen.blit(overlay, (0,0))
+        
+        # Popup Box
+        w, h = 800, 500
+        x, y = (1280 - w)//2, (720 - h)//2
+        rect = pygame.Rect(x, y, w, h)
+        
+        pygame.draw.rect(self.screen, UITheme.PANEL_GREY, rect)
+        pygame.draw.rect(self.screen, UITheme.ACCENT_ORANGE, rect, 2)
+        UITheme.draw_bracket(self.screen, rect, UITheme.ACCENT_ORANGE)
+        
+        # Header
+        self.screen.blit(self.font_header.render("AI ANALYSIS REPORT", True, (255, 255, 255)), (x + 20, y + 20))
+        
+        # Content
+        if state.ai_popup_data:
+            summary = state.ai_popup_data.get('summary', "No Data.")
+            # Wrap and render text inside the box
+            UITheme.render_terminal_text(self.screen, summary, (x + 30, y + 80), self.font_main, UITheme.TEXT_OFF_WHITE, w - 60)
+            
+            # Anomalies
+            anomalies = state.ai_popup_data.get('anomalies', [])
+            if anomalies:
+                self.screen.blit(self.font_bold.render("DETECTED ANOMALIES:", True, (255, 50, 50)), (x + 30, y + 350))
+                anom_txt = ", ".join(anomalies)
+                self.screen.blit(self.font_main.render(anom_txt, True, (255, 100, 100)), (x + 30, y + 380))
+
+        # Buttons
+        layout.btn_popup_close.check_hover(mouse_pos)
+        layout.btn_popup_close.draw(self.screen, self.font_bold)
+        
+        layout.btn_popup_download.check_hover(mouse_pos)
+        layout.btn_popup_download.draw(self.screen, self.font_bold)
+
+    def draw_plot_tooltip(self, mouse_pos):
+        """Draws coordinates when hovering over the plot."""
+        rel_x = (mouse_pos[0] - 850) / 400.0
+        rel_x = max(0, min(1, rel_x)) 
+        ctx = state.plot_context
+        df = ctx.get('df')
+        if df is not None and not df.empty:
+            idx = int(rel_x * (len(df) - 1))
+            row = df.iloc[idx]
+            x_val = row[ctx['x_col']] if ctx.get('x_col') else idx
+            y_val = row[ctx['y_col']] if ctx.get('y_col') else "N/A"
+            tt_text = f"X: {x_val} | Y: {y_val}"
+            tt_surf = self.font_small.render(tt_text, True, (255, 255, 255))
+            tt_bg = pygame.Rect(mouse_pos[0] + 10, mouse_pos[1] + 10, tt_surf.get_width() + 10, 20)
+            pygame.draw.rect(self.screen, (20, 20, 25), tt_bg)
+            pygame.draw.rect(self.screen, UITheme.ACCENT_ORANGE, tt_bg, 1)
+            self.screen.blit(tt_surf, (tt_bg.x + 5, tt_bg.y + 3))
+
     def draw_dashboard(self, mouse_pos, tree_ui, ai_engine):
         self.screen.fill(UITheme.BG_DARK)
         UITheme.draw_grid(self.screen)
@@ -144,7 +232,15 @@ class RenderEngine:
         pygame.draw.rect(self.screen, (10, 10, 15), search_rect)
         pygame.draw.rect(self.screen, (UITheme.ACCENT_ORANGE if state.search_active else (50, 50, 60)), search_rect, 1)
         self.screen.blit(self.font_small.render("SEARCH:", True, UITheme.TEXT_DIM), (800, 48))
-        self.screen.blit(self.font_small.render(state.search_text + ("|" if state.search_active else ""), True, (255, 255, 255)), (855, 48))
+        
+        display_text = state.search_text
+        if state.search_active and (pygame.time.get_ticks() % 1000) > 500: display_text += "_"
+        text_surf = self.font_small.render(display_text, True, (255, 255, 255))
+        if text_surf.get_width() > 190:
+            display_text = "..." + state.search_text[-20:] 
+            if state.search_active and (pygame.time.get_ticks() % 1000) > 500: display_text += "_"
+            text_surf = self.font_small.render(display_text, True, (255, 255, 255))
+        self.screen.blit(text_surf, (855, 48))
 
         # AI STATUS
         ai_status = "AI ONLINE" if ai_engine.client else "AI OFFLINE"
@@ -154,13 +250,13 @@ class RenderEngine:
 
         # TREE SURFACE
         tree_surf = pygame.Surface((800, 600), pygame.SRCALPHA)
-        if pygame.mouse.get_pressed()[0]:
+        if pygame.mouse.get_pressed()[0] and not state.show_ai_popup: # Disable drag if popup is open
             tree_ui.update_drag(mouse_pos, (20, 80, 800, 600))
         else:
             tree_ui.dragged_node_id = None
             
         tree_ui.draw(tree_surf, mouse_pos)
-        tree_ui.draw_minimap(tree_surf, tree_surf.get_rect())
+        tree_ui.draw_minimap(tree_surf, tree_surf.get_rect(), self.icons)
         self.screen.blit(tree_surf, (20, 80))
         UITheme.draw_bracket(self.screen, (20, 80, 800, 600), UITheme.ACCENT_ORANGE)
 
@@ -190,36 +286,34 @@ class RenderEngine:
                 plot_rect = pygame.Rect(850, 100, 400, 300)
                 pygame.draw.rect(self.screen, (50, 50, 55), plot_rect, 1)
                 
-                layout.btn_axis_gear.check_hover(mouse_pos)
-                layout.btn_axis_gear.draw(self.screen, self.font_bold)
+                if self.icons['settings']:
+                    layout.btn_axis_gear.check_hover(mouse_pos)
+                    r = layout.btn_axis_gear.rect
+                    self.screen.blit(self.icons['settings'], (r.x, r.y))
+                    if layout.btn_axis_gear.is_hovered: pygame.draw.rect(self.screen, (255, 255, 255), r, 1)
+                else:
+                    layout.btn_axis_gear.check_hover(mouse_pos)
+                    layout.btn_axis_gear.draw(self.screen, self.font_bold)
                 
-                # Tooltip logic (Visual only)
-                if plot_rect.collidepoint(mouse_pos) and state.plot_context:
+                # Fixed: Use self.draw_plot_tooltip
+                if plot_rect.collidepoint(mouse_pos) and state.plot_context and not state.show_ai_popup:
                     self.draw_plot_tooltip(mouse_pos)
 
-                # AXIS SELECTOR
                 if state.show_axis_selector and state.plot_context:
                     self.draw_axis_selector(mouse_pos)
 
             # ANALYSIS TEXT
             if state.current_analysis:
                 analysis_area = pygame.Rect(850, 420, 390, 200)
-                # Set a clip to prevent text from leaking out of the panel
                 self.screen.set_clip(analysis_area)
-                
                 y_pos = 420 - state.analysis_scroll_y
                 summary_text = state.current_analysis.get('summary', "")
-                
                 h = UITheme.render_terminal_text(self.screen, summary_text, (855, y_pos), self.font_main, UITheme.TEXT_OFF_WHITE, 380)
-                
-                # Metadata notes drawn below summary
                 if len(state.selected_ids) == 1:
                     meta_txt = f"\nRESEARCH NOTES:\n{state.meta_input_notes}"
                     UITheme.render_terminal_text(self.screen, meta_txt, (855, y_pos + h), self.font_main, UITheme.ACCENT_ORANGE, 380)
-                
-                self.screen.set_clip(None) # Reset clip
+                self.screen.set_clip(None)
         else:
-            # METADATA EDITOR
             self.draw_metadata_editor(mouse_pos)
 
         # COMMON BUTTONS
@@ -228,94 +322,15 @@ class RenderEngine:
             b.draw(self.screen, self.font_main)
         
         # OVERLAYS
-        if state.is_processing: 
-            btn_stop = pygame.Rect(1100, 10, 40, 20)
-            pygame.draw.rect(self.screen, (200, 50, 50), btn_stop)
-            self.screen.blit(self.font_small.render("STOP", True, (255, 255, 255)), (1105, 13))
-            if btn_stop.collidepoint(mouse_pos) and pygame.mouse.get_pressed()[0]:
-                state.stop_ai_requested = True
-            draw_loading_overlay(self.screen, self.font_bold)
+        if state.is_processing:
+            if state.processing_mode == "AI":
+                self.draw_ai_loading(mouse_pos)
+            else:
+                draw_loading_overlay(self.screen, self.font_bold)
         
         if state.show_conversion_dialog:
             self.draw_conversion_dialog(mouse_pos)
-
-    def draw_plot_tooltip(self, mouse_pos):
-        rel_x = (mouse_pos[0] - 850) / 400.0
-        rel_x = max(0, min(1, rel_x)) 
-        ctx = state.plot_context
-        df = ctx.get('df')
-        if df is not None and not df.empty:
-            idx = int(rel_x * (len(df) - 1))
-            row = df.iloc[idx]
-            x_val = row[ctx['x_col']] if ctx.get('x_col') else idx
-            y_val = row[ctx['y_col']] if ctx.get('y_col') else "N/A"
-            tt_text = f"X: {x_val} | Y: {y_val}"
-            tt_surf = self.font_small.render(tt_text, True, (255, 255, 255))
-            tt_bg = pygame.Rect(mouse_pos[0] + 10, mouse_pos[1] + 10, tt_surf.get_width() + 10, 20)
-            pygame.draw.rect(self.screen, (20, 20, 25), tt_bg)
-            pygame.draw.rect(self.screen, UITheme.ACCENT_ORANGE, tt_bg, 1)
-            self.screen.blit(tt_surf, (tt_bg.x + 5, tt_bg.y + 3))
-
-    def draw_axis_selector(self, mouse_pos):
-        axis_selector_rect = pygame.Rect(850, 130, 200, 300)
-        pygame.draw.rect(self.screen, (15, 15, 20), axis_selector_rect)
-        pygame.draw.rect(self.screen, (80, 80, 90), axis_selector_rect, 2)
-        self.screen.blit(self.font_bold.render("AXIS SELECTION", True, UITheme.ACCENT_ORANGE), (860, 135))
-        self.screen.blit(self.font_small.render("CLICK COL TO SET: [ X ]  [ Y ]", True, UITheme.TEXT_DIM), (860, 150))
-        
-        df = state.plot_context['df']
-        numeric_cols = df.select_dtypes(include=['number']).columns
-        y_off = 160
-        for col in numeric_cols:
-            is_x = col == state.plot_context.get('x_col')
-            is_y = col == state.plot_context.get('y_col')
-            col_col = (255, 255, 255)
-            if is_x: col_col = (255, 120, 0)
-            if is_y: col_col = (0, 255, 255)
             
-            row_rect = pygame.Rect(850, y_off, 200, 25)
-            if row_rect.collidepoint(mouse_pos): 
-                pygame.draw.rect(self.screen, (30, 30, 40), row_rect)
-            
-            self.screen.blit(self.font_main.render(col[:20], True, col_col), (860, y_off + 4))
-            if is_x: self.screen.blit(self.font_small.render("[X]", True, col_col), (980, y_off + 6))
-            if is_y: self.screen.blit(self.font_small.render("[Y]", True, col_col), (1010, y_off + 6))
-            y_off += 25
-
-    def draw_metadata_editor(self, mouse_pos):
-        self.screen.blit(self.font_bold.render("PROJECT NOTES", True, UITheme.ACCENT_ORANGE), (855, 100))
-        
-        self.screen.blit(self.font_main.render("Type to add observations...", True, UITheme.TEXT_DIM), (855, 130))
-        
-        # Single Large Text Area
-        rect = pygame.Rect(855, 160, 390, 300)
-        pygame.draw.rect(self.screen, (10, 10, 15), rect)
-        pygame.draw.rect(self.screen, UITheme.ACCENT_ORANGE, rect, 1)
-        
-        # Render Text wrapped
-        UITheme.render_terminal_text(self.screen, state.meta_input_notes + "|", (860, 165), self.font_main, (255, 255, 255), 380)
-
-        layout.btn_save_meta.check_hover(mouse_pos)
-        layout.btn_save_meta.draw(self.screen, self.font_main)
-
-    def draw_conversion_dialog(self, mouse_pos):
-        overlay = pygame.Surface((1280, 720), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 220))
-        self.screen.blit(overlay, (0,0))
-        
-        d_rect = pygame.Rect(440, 260, 400, 200)
-        pygame.draw.rect(self.screen, UITheme.PANEL_GREY, d_rect)
-        UITheme.draw_bracket(self.screen, d_rect, UITheme.ACCENT_ORANGE)
-        
-        msg1 = self.font_bold.render("UNIT MISMATCH DETECTED", True, UITheme.ACCENT_ORANGE)
-        msg2 = self.font_main.render(f"Convert Secondary Node to {state.pending_conversion[2]}?", True, UITheme.TEXT_OFF_WHITE)
-        msg3 = self.font_main.render("This updates the CSV file permanently.", True, UITheme.TEXT_DIM)
-        
-        self.screen.blit(msg1, (d_rect.centerx - msg1.get_width()//2, 280))
-        self.screen.blit(msg2, (d_rect.centerx - msg2.get_width()//2, 320))
-        self.screen.blit(msg3, (d_rect.centerx - msg3.get_width()//2, 350))
-        
-        layout.btn_conv_yes.check_hover(mouse_pos)
-        layout.btn_conv_yes.draw(self.screen, self.font_bold)
-        layout.btn_conv_no.check_hover(mouse_pos)
-        layout.btn_conv_no.draw(self.screen, self.font_bold)
+        # --- NEW: AI POPUP OVERLAY ---
+        if state.show_ai_popup:
+            self.draw_ai_popup(mouse_pos)

@@ -16,6 +16,7 @@ class AppState:
         
         # Processing / Status
         self.is_processing = False
+        self.processing_mode = "NORMAL" # "NORMAL" or "AI"
         self.needs_tree_update = False 
         self.status_msg = "SYSTEM READY"
         
@@ -23,11 +24,15 @@ class AppState:
         self.show_conversion_dialog = False
         self.pending_conversion = None 
         
+        # AI Result Popup
+        self.show_ai_popup = False
+        self.ai_popup_data = None
+        
         # Extended UI Toggles
         self.show_ai_panel = False          
         self.is_editing_metadata = False
         
-        # GLOBAL EDITOR STATE (Moved from main.py)
+        # GLOBAL EDITOR STATE
         self.editor_df = None
         self.editor_file_path = None
         self.editor_scroll_y = 0
@@ -38,7 +43,7 @@ class AppState:
         self.search_text = ""
         self.search_active = False
         
-        # METADATA STATE (Simplified)
+        # METADATA STATE
         self.meta_input_notes = ""
         
         # APP FLOW
@@ -51,7 +56,6 @@ class AppState:
         self.minimap_collapsed = False
         
         # UNDO/REDO STATE
-        # Key: node_id, Value: List of hashes [hash1, hash2]
         self.redo_stack = {} 
 
 state = AppState()

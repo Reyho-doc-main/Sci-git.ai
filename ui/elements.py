@@ -1,3 +1,4 @@
+# --- FILE: elements.py ---
 import pygame
 from settings import UITheme
 from state_manager import state
@@ -180,8 +181,11 @@ class VersionTree:
                 name_txt = self.font.render(name_trunc, True, name_col)
                 surface.blit(name_txt, (ix - 30, iy + current_radius + 5))
 
-    def draw_minimap(self, surface, panel_rect):
-        """Draws a minimap overlay in the bottom-right of the tree panel."""
+    def draw_minimap(self, surface, panel_rect, icons=None):
+        """
+        Draws a minimap overlay in the bottom-right of the tree panel.
+        Added: `icons` parameter to support images for collapse/expand.
+        """
         if not self.nodes: return
 
         # Constants
@@ -194,9 +198,13 @@ class VersionTree:
             self.minimap_rect = None # No map interaction when collapsed
             self.minimap_btn_rect = pygame.Rect(panel_rect.w - 30, panel_rect.h - 30, 20, 20)
             
-            pygame.draw.rect(surface, UITheme.PANEL_GREY, self.minimap_btn_rect)
-            pygame.draw.rect(surface, UITheme.ACCENT_ORANGE, self.minimap_btn_rect, 1)
-            surface.blit(self.font.render("+", True, UITheme.ACCENT_ORANGE), (self.minimap_btn_rect.x + 6, self.minimap_btn_rect.y + 2))
+            # --- MODIFIED: Use Image if available ---
+            if icons and icons.get('expand'):
+                surface.blit(icons['expand'], (self.minimap_btn_rect.x, self.minimap_btn_rect.y))
+            else:
+                pygame.draw.rect(surface, UITheme.PANEL_GREY, self.minimap_btn_rect)
+                pygame.draw.rect(surface, UITheme.ACCENT_ORANGE, self.minimap_btn_rect, 1)
+                surface.blit(self.font.render("+", True, UITheme.ACCENT_ORANGE), (self.minimap_btn_rect.x + 6, self.minimap_btn_rect.y + 2))
             return
 
         # 2. Draw Expanded State
@@ -204,8 +212,12 @@ class VersionTree:
         self.minimap_btn_rect = pygame.Rect(dest_x + map_w - 20, dest_y - 20, 20, 20)
         
         # Draw Collapse Button
-        pygame.draw.rect(surface, (50, 20, 20), self.minimap_btn_rect)
-        surface.blit(self.font.render("_", True, (255, 255, 255)), (self.minimap_btn_rect.x + 6, self.minimap_btn_rect.y - 4))
+        # --- MODIFIED: Use Image if available ---
+        if icons and icons.get('collapse'):
+            surface.blit(icons['collapse'], (self.minimap_btn_rect.x, self.minimap_btn_rect.y))
+        else:
+            pygame.draw.rect(surface, (50, 20, 20), self.minimap_btn_rect)
+            surface.blit(self.font.render("_", True, (255, 255, 255)), (self.minimap_btn_rect.x + 6, self.minimap_btn_rect.y - 4))
 
         # Draw Map Background
         s = pygame.Surface((map_w, map_h))

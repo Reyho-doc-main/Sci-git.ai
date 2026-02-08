@@ -1,3 +1,4 @@
+# --- FILE: ui/layout.py ---
 from ui.components import Button
 from settings import UITheme
 
@@ -31,7 +32,7 @@ class UILayout:
         # MENU
         self.btn_menu_file = Button(20, 45, 60, 20, "FILE", UITheme.PANEL_GREY)
         self.btn_menu_edit = Button(90, 45, 100, 20, "EDIT FILE", UITheme.PANEL_GREY)
-        self.btn_menu_analyze = Button(200, 45, 80, 20, "ANALYZE", UITheme.PANEL_GREY)
+        self.btn_menu_analyze = Button(200, 45, 80, 20, "AI ANALYSIS", UITheme.PANEL_GREY) # Renamed to AI
         self.btn_toggle_ai = Button(1100, 45, 150, 20, "AI ASSISTANT", (100, 0, 255))
         
         # EDITOR
@@ -40,5 +41,12 @@ class UILayout:
 
         self.btn_undo = Button(300, 10, 80, 25, "UNDO [^Z]", (60, 60, 70))
         self.btn_redo = Button(390, 10, 80, 25, "REDO [^Y]", (60, 60, 70))
+
+        # AI LOADING
+        self.btn_ai_stop = Button(SCREEN_CENTER_X - 100, 500, 200, 50, "ABORT SEQUENCE", (200, 50, 50))
+
+        # AI POPUP RESULT
+        self.btn_popup_close = Button(SCREEN_CENTER_X - 210, 550, 200, 40, "CLOSE", (200, 50, 50))
+        self.btn_popup_download = Button(SCREEN_CENTER_X + 10, 550, 200, 40, "DOWNLOAD PDF", UITheme.ACCENT_ORANGE)
 
 layout = UILayout()

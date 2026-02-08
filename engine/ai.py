@@ -16,7 +16,6 @@ class ExperimentSchema(BaseModel):
     is_reproducible: bool
     ai_generated: bool = True
 
-    # --- FIX: Handle AI returning list instead of string ---
     @field_validator('next_steps', mode='before')
     @classmethod
     def flatten_list_to_string(cls, v: Any) -> str:
@@ -26,11 +25,12 @@ class ExperimentSchema(BaseModel):
 
 class ScienceAI:
     def __init__(self):
-        # Load specific env vars or defaults
         self.api_key = os.getenv("AZURE_OPENAI_API_KEY")
         self.endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-        self.deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-5-nano")
         self.api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+        
+        # Default fallback
+        self.default_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-5-nano")
         
         if not self.api_key: print("DEBUG: AI Key Missing")
         if not self.endpoint: print("DEBUG: AI Endpoint Missing")
@@ -47,11 +47,29 @@ class ScienceAI:
                 print(f"AI Connection Failed: {e}")
                 self.client = None
 
-    def analyze_csv_data(self, csv_path: str) -> ExperimentSchema:
+    def get_placeholder_analysis(self, csv_path: str) -> ExperimentSchema:
+        """Fast, local analysis for immediate UI feedback without AI lag."""
+        try:
+            df = pd.read_csv(csv_path)
+            cols = len(df.columns)
+            rows = len(df)
+            summary = f"File imported successfully. Contains {rows} rows and {cols} columns. Click 'ANALYZE' to run AI diagnostics."
+        except:
+            summary = "File imported. Pending analysis."
+            
+        return ExperimentSchema(
+            summary=summary,
+            anomalies=[],
+            next_steps="Select this node and click ANALYZE to generate insights.",
+            is_reproducible=True,
+            ai_generated=False
+        )
+
+    def analyze_csv_data(self, csv_path: str, model: str = "gpt-5-mini") -> ExperimentSchema:
         df = pd.read_csv(csv_path)
         if df.empty or len(df.columns) < 2 or len(df) < 3:
             return ExperimentSchema(
-                summary="There is a lack of data provided for an accurate AI analysis. Please provide more data.",
+                summary="Insufficient data for analysis.",
                 anomalies=["INSUFFICIENT_DATA"],
                 next_steps="Upload a more comprehensive dataset.",
                 is_reproducible=False
@@ -63,11 +81,10 @@ class ScienceAI:
         
         if self.client:
             try:
-                # Limit tokens to prevent lag/timeout
                 csv_snippet = df.head(15).to_csv()
                 prompt = f"Analyze this experimental data and return JSON:\n{csv_snippet}"
                 response = self.client.chat.completions.create(
-                    model=self.deployment,
+                    model=model, # Use Mini for single files
                     messages=[
                         {"role": "system", "content": "You are a scientific data analyzer. Return strictly valid JSON with keys: summary, anomalies (list of strings), next_steps (single string), is_reproducible (bool)."},
                         {"role": "user", "content": prompt}
@@ -76,12 +93,9 @@ class ScienceAI:
                 )
                 data = json.loads(response.choices[0].message.content)
                 data["ai_generated"] = True
-                
-                # Pydantic validation (now with validator)
                 return ExperimentSchema(**data)
             except Exception as e:
                 print(f"AI Error: {e}")
-                # Fallthrough to local analysis on error
         
         return self._local_analysis(df)
 
@@ -96,7 +110,7 @@ class ScienceAI:
             try:
                 prompt = f"Compare Parent (A) vs Child (B) stats:\nA: {stats1}\nB: {stats2}\nIdentify drift. Return JSON: {{summary, anomalies}}."
                 response = self.client.chat.completions.create(
-                    model=self.deployment,
+                    model="gpt-5-mini", # Use Mini for comparison too
                     messages=[{"role": "system", "content": "Concise delta analysis."}, {"role": "user", "content": prompt}],
                     response_format={"type": "json_object"}
                 )
@@ -105,13 +119,13 @@ class ScienceAI:
         return self._local_comparison(df1, df2, numeric_cols)
 
     def analyze_branch_history(self, history_text: str) -> str:
-        """Generates a narrative change log for a branch."""
+        """Generates a narrative change log for a branch using NANO."""
         if not self.client: return "AI OFFLINE: Cannot generate branch report."
         
         try:
             prompt = f"Here is the commit history of a scientific experiment branch:\n{history_text}\n\nWrite a concise 'Evolutionary Report' summarizing how the experiment changed over time."
             response = self.client.chat.completions.create(
-                model=self.deployment,
+                model="gpt-5-nano", # Keep Nano for broad project analysis
                 messages=[{"role": "system", "content": "You are a research historian."}, {"role": "user", "content": prompt}]
             )
             return response.choices[0].message.content
