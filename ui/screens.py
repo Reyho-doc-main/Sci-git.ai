@@ -203,6 +203,22 @@ class RenderEngine:
 
             # ANALYSIS TEXT
             if state.current_analysis:
+                analysis_area = pygame.Rect(850, 420, 390, 200)
+                # Set a clip to prevent text from leaking out of the panel
+                self.screen.set_clip(analysis_area)
+                
+                y_pos = 420 - state.analysis_scroll_y
+                summary_text = state.current_analysis.get('summary', "")
+                
+                h = UITheme.render_terminal_text(self.screen, summary_text, (855, y_pos), self.font_main, UITheme.TEXT_OFF_WHITE, 380)
+                
+                # Metadata notes drawn below summary
+                if len(state.selected_ids) == 1:
+                    meta_txt = f"\nRESEARCH NOTES:\n{state.meta_input_notes}\nTEMP: {state.meta_input_temp} | ID: {state.meta_input_sid}"
+                    UITheme.render_terminal_text(self.screen, meta_txt, (855, y_pos + h), self.font_main, UITheme.ACCENT_ORANGE, 380)
+                
+                self.screen.set_clip(None) # Reset clip
+                
                 UITheme.render_terminal_text(self.screen, state.current_analysis.get('summary', ""), (855, 420), self.font_main, UITheme.TEXT_OFF_WHITE, 390)
                 if len(state.selected_ids) == 1:
                     meta_txt = f"NOTE: {state.meta_input_notes}\nTEMP: {state.meta_input_temp} | ID: {state.meta_input_sid}"
@@ -219,6 +235,11 @@ class RenderEngine:
         
         # OVERLAYS
         if state.is_processing: 
+            btn_stop = pygame.Rect(1100, 10, 40, 20)
+            pygame.draw.rect(self.screen, (200, 50, 50), btn_stop)
+            self.screen.blit(self.font_small.render("STOP", True, (255, 255, 255)), (1105, 13))
+            if btn_stop.collidepoint(mouse_pos) and pygame.mouse.get_pressed()[0]:
+                state.stop_ai_requested = True
             draw_loading_overlay(self.screen, self.font_bold)
         
         if state.show_conversion_dialog:

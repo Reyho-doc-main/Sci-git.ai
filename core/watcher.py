@@ -2,6 +2,7 @@ import os
 import threading
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+from state_manager import state
 
 class ExperimentHandler(FileSystemEventHandler):
     def __init__(self, event_queue):
@@ -9,6 +10,11 @@ class ExperimentHandler(FileSystemEventHandler):
         self.timers = {}  # Store active timers: {path: Timer}
         self.debounce_interval = 2.0  # Wait 2 seconds after LAST write
         self.marker_file = ".restore_in_progress"
+
+    def on_created(self, event):
+        """Added to catch files immediately when they are dropped/pasted."""
+        if not event.is_directory:
+            self.on_modified(event)
 
     def on_modified(self, event):
         if event.is_directory or not (event.src_path.endswith('.csv') or event.src_path.endswith('.xlsx')):

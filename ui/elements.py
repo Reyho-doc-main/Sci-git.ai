@@ -189,6 +189,14 @@ class VersionTree:
         """Draws a minimap overlay in the bottom-right of the tree panel."""
         if not self.nodes: return
 
+        if state.minimap_collapsed:
+            collapse_rect = pygame.Rect(panel_rect.w - 30, panel_rect.h - 30, 20, 20)
+            pygame.draw.rect(surface, UITheme.PANEL_GREY, collapse_rect)
+            pygame.draw.rect(surface, UITheme.ACCENT_ORANGE, collapse_rect, 1)
+            surface.blit(self.font.render("+", True, UITheme.ACCENT_ORANGE), (panel_rect.w - 25, panel_rect.h - 28))
+            self.minimap_rect = collapse_rect # Re-use rect for the expand button
+            return
+
         # 1. Calculate Bounds
         all_x = [n["pos"].x for n in self.nodes]
         all_y = [n["pos"].y for n in self.nodes]
@@ -205,6 +213,10 @@ class VersionTree:
         dest_x = panel_rect.w - map_w - 10
         dest_y = panel_rect.h - map_h - 10
         self.minimap_rect = pygame.Rect(dest_x, dest_y, map_w, map_h)
+
+        btn_close = pygame.Rect(dest_x + map_w - 20, dest_y - 20, 20, 20)
+        pygame.draw.rect(surface, (50, 20, 20), btn_close)
+        surface.blit(self.font.render("_", True, (255, 255, 255)), (btn_close.x + 5, btn_close.y - 5))
 
         # Background
         s = pygame.Surface((map_w, map_h))
@@ -231,7 +243,7 @@ class VersionTree:
             if node["branch"] != "main": col = UITheme.NODE_BRANCH
             
             pygame.draw.circle(surface, col, (mx, my), 2)
-            
+
             if not self.minimap_rect.collidepoint(mx, my):
                 edge_x = max(self.minimap_rect.left + 5, min(mx, self.minimap_rect.right - 5))
                 edge_y = max(self.minimap_rect.top + 5, min(my, self.minimap_rect.bottom - 5))
@@ -259,11 +271,25 @@ class VersionTree:
         local_y = mouse_pos[1] - panel_rect[1]
         local_mouse = pygame.Vector2(local_x, local_y)
 
-        # 2. Check Minimap Click
+        # --- ADDED: MINIMAP INTERACTION ---
         if self.minimap_rect and self.minimap_rect.collidepoint(local_x, local_y):
-            # Jump to location
-            # Inverse of the draw_minimap logic is complex, skipping for hackathon speed.
-            # We just return None to consume the click so it doesn't deselect nodes.
+            if state.minimap_collapsed or local_y < self.minimap_rect.top:
+                state.minimap_collapsed = not state.minimap_collapsed
+                return None
+            
+            # Teleport Camera: Map click percent to world space
+            rel_click_x = (local_x - self.minimap_rect.x) / self.minimap_rect.w
+            rel_click_y = (local_y - self.minimap_rect.y) / self.minimap_rect.h
+            
+            all_x = [n["pos"].x for n in self.nodes]
+            all_y = [n["pos"].y for n in self.nodes]
+            min_x, max_x = min(all_x), max(all_x)
+            min_y, max_y = min(all_y), max(all_y)
+            
+            world_target_x = min_x + (rel_click_x * (max_x - min_x))
+            world_target_y = min_y + (rel_click_y * (max_y - min_y))
+            
+            self.camera_offset = pygame.Vector2(panel_rect[2]/2, panel_rect[3]/2) - (pygame.Vector2(world_target_x, world_target_y) * self.zoom_level)
             return None
 
         # 3. Check Node Click
@@ -308,6 +334,8 @@ class VersionTree:
         local_y = mouse_pos[1] - panel_rect[1]
 
         tree_mouse = (pygame.Vector2(local_x, local_y) - self.camera_offset) / self.zoom_level
+        tree_mouse.x = max(-2000, min(5000, tree_mouse.x))
+        tree_mouse.y = max(-2000, min(5000, tree_mouse.y))
         
         for node in self.nodes:
             if node["id"] == self.dragged_node_id:

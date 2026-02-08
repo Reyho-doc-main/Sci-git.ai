@@ -141,3 +141,19 @@ class DBHandler:
             cursor = self.conn.cursor()
             cursor.execute("SELECT file_hash FROM node_history WHERE node_id = ? ORDER BY rowid ASC", (node_id,))
             return [r[0] for r in cursor.fetchall()]
+            
+    def remove_last_history_entry(self, node_id):
+        """Removes the most recent history entry (Used for Undo)."""
+        with self.lock:
+            cursor = self.conn.cursor()
+            # SQLite doesn't have a simple pop, so we use subquery on rowid
+            query = """
+            DELETE FROM node_history 
+            WHERE rowid = (
+                SELECT rowid FROM node_history 
+                WHERE node_id = ? 
+                ORDER BY rowid DESC LIMIT 1
+            )
+            """
+            cursor.execute(query, (node_id,))
+            self.conn.commit()

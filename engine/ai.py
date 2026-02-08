@@ -4,6 +4,10 @@ import pandas as pd
 from pydantic import BaseModel
 from typing import List
 from openai import AzureOpenAI
+from dotenv import load_dotenv
+from state_manager import state
+
+load_dotenv()
 
 class ExperimentSchema(BaseModel):
     summary: str
@@ -20,6 +24,9 @@ class ScienceAI:
         self.deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-5-nano")
         self.api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
         
+        if not self.api_key: print("DEBUG: AI Key Missing")
+        if not self.endpoint: print("DEBUG: AI Endpoint Missing")
+
         self.client = None
         if self.api_key and self.endpoint:
             try:
@@ -34,6 +41,26 @@ class ScienceAI:
 
     def analyze_csv_data(self, csv_path: str) -> ExperimentSchema:
         df = pd.read_csv(csv_path)
+        if df.empty or len(df.columns) < 2 or len(df) < 3:
+            return ExperimentSchema(
+                summary="There is a lack of data provided for an accurate AI analysis. Please provide more data.",
+                anomalies=["INSUFFICIENT_DATA"],
+                next_steps="Upload a more comprehensive dataset.",
+                is_reproducible=False
+            )
+        
+        if df.empty or len(df.columns) < 2:
+            return ExperimentSchema(
+                summary="There is a lack of data provided for an accurate AI analysis. Please provide more data.",
+                anomalies=["INSUFFICIENT_DATA"],
+                next_steps="Provide more data.",
+                is_reproducible=False
+            )
+
+        if state.stop_ai_requested:
+            state.stop_ai_requested = False
+            return self._local_analysis(df)
+        
         if self.client:
             try:
                 csv_snippet = df.head(15).to_csv()

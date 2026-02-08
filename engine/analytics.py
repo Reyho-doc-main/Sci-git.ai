@@ -34,9 +34,9 @@ def create_seaborn_surface(df1, df2=None, width=400, height=300, x_col=None, y_c
     Generates a Seaborn plot as RAW BYTES (Thread-safe).
     Returns: (raw_buffer, size_tuple, context_dict)
     """
+    fig = Figure(figsize=(width/80, height/80), dpi=80, facecolor='#16161a')
     try:
         # DPI=80 matches the previous sizing logic
-        fig = Figure(figsize=(width/80, height/80), dpi=80, facecolor='#16161a')
         canvas = FigureCanvasAgg(fig)
         
         context = {

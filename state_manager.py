@@ -1,4 +1,3 @@
-# --- FILE: state_manager.py ---
 class AppState:
     def __init__(self):
         # Core identifiers
@@ -46,5 +45,13 @@ class AppState:
         self.researcher_name = ""
         self.show_login_box = False
         self.selected_project_path = ""
+
+        self.analysis_scroll_y = 0
+        self.stop_ai_requested = False
+        self.minimap_collapsed = False
+        
+        # UNDO/REDO STATE
+        # Key: node_id, Value: List of hashes [hash1, hash2]
+        self.redo_stack = {} 
 
 state = AppState()

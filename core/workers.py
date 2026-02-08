@@ -7,6 +7,7 @@ import shutil
 from queue import Queue
 from state_manager import state
 from engine.analytics import create_seaborn_surface, HeaderScanner
+from core.hashing import save_to_vault, get_file_hash, ensure_vault
 
 class WorkerController:
     def __init__(self, db, ai_engine):
@@ -18,15 +19,33 @@ class WorkerController:
             if len(exp_ids) == 1:
                 raw = self.db.get_experiment_by_id(exp_ids[0])
                 if raw:
+                    file_path = raw[3]
+
+                    if not os.path.exists(file_path):
+                        return {
+                            "type": "LOAD_COMPLETE",
+                            "data": {
+                                "analysis": {"summary": "CRITICAL ERROR: The source CSV file for this node has been moved or deleted.", "anomalies": ["FILE_NOT_FOUND"]},
+                                "status": "FILE MISSING",
+                                "is_corrupted": True
+                            }
+                        }
                     saved_settings = None
                     if len(raw) > 11 and raw[11]: saved_settings = json.loads(raw[11])
                     final_x = custom_x if custom_x else (saved_settings.get("x") if saved_settings else None)
                     final_y = custom_y if custom_y else (saved_settings.get("y") if saved_settings else None)
-                    
+
                     if save_settings and final_x and final_y: 
                         self.db.update_plot_settings(exp_ids[0], final_x, final_y)
 
-                    df = pd.read_csv(raw[3])
+                    file_size = os.path.getsize(file_path)
+                    if file_size > 50 * 1024 * 1024: # 50MB
+                        df = pd.read_csv(file_path, nrows=1000)
+                        status_note = "LARGE FILE: PREVIEW MODE (FIRST 1000 ROWS)"
+                    else:
+                        df = pd.read_csv(file_path)
+                        status_note = f"LOADED: {raw[2]}"
+
                     plot_bytes, size, context = create_seaborn_surface(df, x_col=final_x, y_col=final_y)
                     
                     return {
@@ -35,7 +54,7 @@ class WorkerController:
                             "plot_data": (plot_bytes, size, context),
                             "analysis": json.loads(raw[4]),
                             "metadata": {"notes": raw[8], "temp": raw[9], "sid": raw[10]},
-                            "status": f"LOADED: {raw[2]}"
+                            "status": status_note
                         }
                     }
             elif len(exp_ids) == 2:
@@ -122,6 +141,80 @@ class WorkerController:
         except Exception as e:
             return {"type": "ERROR", "data": str(e)}
 
+    def worker_save_editor_changes(self, node_id, file_path, df, project_path):
+        """Saves editor changes with version control (hashing old version)."""
+        try:
+            # 1. Archive the current version on disk before overwriting
+            old_hash = save_to_vault(file_path, project_path)
+            if old_hash:
+                self.db.add_hash_to_history(node_id, old_hash)
+            
+            # 2. Save the new data
+            df.to_csv(file_path, index=False)
+            
+            # 3. Reload visualization
+            return {
+                "type": "SAVE_COMPLETE", 
+                "data": {"node_id": node_id, "status": "VERSION SAVED"}
+            }
+        except Exception as e:
+            return {"type": "ERROR", "data": str(e)}
+
+    def worker_undo(self, node_id, file_path, project_path, redo_stack_list):
+        """Reverts file to previous hash, pushes current to Redo stack."""
+        try:
+            history = self.db.get_node_history(node_id)
+            if not history:
+                return {"type": "ERROR", "data": "NO HISTORY TO UNDO"}
+            
+            # The last item in history is the state *before* the current file state
+            target_hash = history[-1]
+            vault_file = os.path.join(project_path, ".sci_vault", f"{target_hash}.csv")
+            
+            if not os.path.exists(vault_file):
+                return {"type": "ERROR", "data": "VERSION MISSING IN VAULT"}
+
+            # 1. Save CURRENT state to Vault for Redo
+            current_hash = save_to_vault(file_path, project_path)
+            
+            # 2. Restore Old File
+            shutil.copy2(vault_file, file_path)
+            
+            # 3. Update DB (Remove used history) and return data for Redo Stack
+            self.db.remove_last_history_entry(node_id)
+            
+            return {
+                "type": "UNDO_COMPLETE",
+                "data": {
+                    "node_id": node_id,
+                    "redo_hash": current_hash,
+                    "restored_hash": target_hash
+                }
+            }
+        except Exception as e:
+            return {"type": "ERROR", "data": str(e)}
+
+    def worker_redo(self, node_id, file_path, project_path, redo_hash):
+        try:
+            vault_file = os.path.join(project_path, ".sci_vault", f"{redo_hash}.csv")
+            if not os.path.exists(vault_file):
+                 return {"type": "ERROR", "data": "REDO TARGET MISSING"}
+            
+            # 1. Save CURRENT state (which was the 'Undo' state) back to history
+            current_hash = save_to_vault(file_path, project_path)
+            if current_hash:
+                self.db.add_hash_to_history(node_id, current_hash)
+                
+            # 2. Restore the Redo file
+            shutil.copy2(vault_file, file_path)
+            
+            return {
+                "type": "REDO_COMPLETE",
+                "data": {"node_id": node_id, "restored_hash": redo_hash}
+            }
+        except Exception as e:
+             return {"type": "ERROR", "data": str(e)}
+
 class TaskQueue:
     def __init__(self):
         self.task_queue = Queue()
@@ -192,4 +285,22 @@ class TaskQueue:
             
             elif msg_type == "EXPORT_COMPLETE":
                 state.status_msg = data
+                state.is_processing = False
+
+            elif msg_type == "SAVE_COMPLETE":
+                # Clear Redo stack on new save (divergent history)
+                if 'node_id' in data:
+                    state.redo_stack[data['node_id']] = [] 
+                state.status_msg = "VERSION SAVED."
+                state.is_processing = False
+
+            elif msg_type == "UNDO_COMPLETE":
+                node_id = data['node_id']
+                if node_id not in state.redo_stack: state.redo_stack[node_id] = []
+                state.redo_stack[node_id].append(data['redo_hash'])
+                state.status_msg = f"UNDO: RESTORED {data['restored_hash'][:8]}"
+                state.is_processing = False
+            
+            elif msg_type == "REDO_COMPLETE":
+                state.status_msg = f"REDO: RESTORED {data['restored_hash'][:8]}"
                 state.is_processing = False

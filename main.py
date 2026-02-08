@@ -26,6 +26,15 @@ root = tk.Tk()
 root.withdraw() 
 screen = pygame.display.set_mode((1280, 720))
 pygame.display.set_caption("SCI-GIT // Research Version Control")
+
+# --- ICON SETUP ---
+try:
+    if os.path.exists("logo.jpg"):
+        icon_surf = pygame.image.load("logo.jpg")
+        pygame.display.set_icon(icon_surf)
+except Exception as e:
+    print(f"Icon load failed: {e}")
+
 clock = pygame.time.Clock()
 
 # --- OBJECTS ---
@@ -45,7 +54,7 @@ STATE_EDITOR = "EDITOR"
 current_state = STATE_SPLASH
 
 def init_project(path):
-    for folder in ["data", "exports", "logs"]: os.makedirs(os.path.join(path, folder), exist_ok=True)
+    for folder in ["data", "exports", "logs", ".sci_vault"]: os.makedirs(os.path.join(path, folder), exist_ok=True)
 
 def load_database_safe(path):
     global db, worker_ctrl
@@ -56,25 +65,72 @@ def load_database_safe(path):
     worker_ctrl = WorkerController(db, ai_engine) # Connect worker to DB
 
 def save_editor_changes():
-    try:
-        state.editor_df.to_csv(state.editor_file_path, index=False)
-        state.status_msg = "FILE UPDATED SUCCESSFULLY."
-        task_manager.add_task(worker_ctrl.worker_load_experiment, [state.selected_ids])
-    except Exception as e:
-        state.status_msg = f"SAVE FAILED: {e}"
+    if not state.selected_ids: return
+    
+    # --- CRITICAL FIX: Commit pending buffer before saving ---
+    # If the user is still "editing" a cell (typing) and clicks Save, 
+    # the value is in 'editor_input_buffer', not the DataFrame yet.
+    if state.editor_selected_cell:
+        r, c = state.editor_selected_cell
+        try:
+            # Try converting to float if possible
+            val = float(state.editor_input_buffer)
+            state.editor_df.iloc[r, c] = val
+        except ValueError:
+            # Fallback to string
+            state.editor_df.iloc[r, c] = state.editor_input_buffer
+        # Clear selection so we know it's committed
+        state.editor_selected_cell = None
+
+    state.status_msg = "SAVING & VERSIONING..."
+    
+    # Delegate to worker to avoid UI freeze and handle hashing
+    # We pass a copy of the dataframe to ensure thread safety
+    task_manager.add_task(worker_ctrl.worker_save_editor_changes, [
+        state.selected_ids[0], 
+        state.editor_file_path, 
+        state.editor_df.copy(), 
+        state.selected_project_path
+    ])
 
 def perform_undo():
     if not state.selected_ids: return
     node_id = state.selected_ids[0]
-    history = db.get_node_history(node_id)
-    if len(history) > 1:
-        # Get previous hash (we are at the last index)
-        prev_hash = history[-2] 
-        vault_file = os.path.join(state.selected_project_path, ".sci_vault", f"{prev_hash}.csv")
-        # Overwrite current working file
-        shutil.copy2(vault_file, state.editor_file_path)
-        state.status_msg = f"UNDO: RESTORED VERSION {prev_hash[:8]}"
-        task_manager.add_task(worker_ctrl.worker_load_experiment, [state.selected_ids])
+    
+    # Check if we have history locally or in DB (DB check happens in worker)
+    # Get file path from DB for safety
+    raw = db.get_experiment_by_id(node_id)
+    if not raw: return
+    
+    state.status_msg = "UNDOING..."
+    task_manager.add_task(worker_ctrl.worker_undo, [
+        node_id,
+        raw[3], # File path
+        state.selected_project_path,
+        state.redo_stack.get(node_id, [])
+    ])
+
+def perform_redo():
+    if not state.selected_ids: return
+    node_id = state.selected_ids[0]
+    
+    if node_id not in state.redo_stack or not state.redo_stack[node_id]:
+        state.status_msg = "NOTHING TO REDO"
+        return
+
+    raw = db.get_experiment_by_id(node_id)
+    if not raw: return
+
+    # Pop the hash here to get the target hash
+    redo_hash = state.redo_stack[node_id].pop()
+    
+    state.status_msg = "REDOING..."
+    task_manager.add_task(worker_ctrl.worker_redo, [
+        node_id,
+        raw[3],
+        state.selected_project_path,
+        redo_hash
+    ])
 
 # ==============================================================================
 # GAME LOOP
@@ -84,7 +140,23 @@ while running:
     mouse_pos = pygame.mouse.get_pos()
     events = pygame.event.get()
     
+    # Process Task Results
     task_manager.process_results()
+    
+    # --- POST-PROCESSING VISUAL UPDATES ---
+    # If a save/undo/redo just finished, we need to reload the plot/data 
+    # to show the user the result immediately.
+    if not state.is_processing:
+        if "VERSION SAVED" in state.status_msg or "RESTORED" in state.status_msg:
+             if state.selected_ids:
+                 # Trigger a reload of the current experiment to refresh plot/stats
+                 task_manager.add_task(worker_ctrl.worker_load_experiment, [state.selected_ids])
+                 
+                 # Update status so we don't loop forever
+                 if "VERSION SAVED" in state.status_msg: 
+                     state.status_msg = "SAVED."
+                 elif "RESTORED" in state.status_msg:
+                     state.status_msg = "READY."
     
     if not event_queue.empty() and not state.is_processing and worker_ctrl:
         ev = event_queue.get()
@@ -100,6 +172,7 @@ while running:
         if current_state == STATE_EDITOR and event.type == pygame.KEYDOWN:
             if state.editor_selected_cell:
                 if event.key == pygame.K_RETURN:
+                    # Commit change
                     r, c = state.editor_selected_cell
                     try:
                         val = float(state.editor_input_buffer)
@@ -119,6 +192,10 @@ while running:
                 perform_undo()
             elif keys[pygame.K_RCTRL] and event.key == pygame.K_z and current_state == STATE_DASHBOARD:
                 perform_undo()
+            elif keys[pygame.K_LCTRL] and event.key == pygame.K_y and current_state == STATE_DASHBOARD:
+                perform_redo()
+            elif keys[pygame.K_RCTRL] and event.key == pygame.K_y and current_state == STATE_DASHBOARD:
+                perform_redo()
 
         # --- MOUSE INPUT ---
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -129,7 +206,7 @@ while running:
                 elif layout.btn_editor_exit.check_hover(mouse_pos):
                     current_state = STATE_DASHBOARD
                 
-                # GRID CLICK LOGIC (Keep minimal calculation here or move to layout helper)
+                # GRID CLICK LOGIC
                 if 50 < mouse_pos[0] < 1230 and 100 < mouse_pos[1] < 600:
                     rel_y = mouse_pos[1] - 100
                     row_idx = (rel_y // 30) + int(state.editor_scroll_y)
@@ -181,6 +258,12 @@ while running:
 
                     if layout.btn_menu_file.check_hover(mouse_pos):
                         task_manager.add_task(worker_ctrl.worker_export_project, [state.selected_project_path])
+                    
+                    if layout.btn_undo.check_hover(mouse_pos):
+                        perform_undo()
+                    
+                    if layout.btn_redo.check_hover(mouse_pos):
+                        perform_redo()
 
                     if layout.btn_axis_gear.check_hover(mouse_pos): 
                         state.show_axis_selector = not state.show_axis_selector
@@ -218,11 +301,7 @@ while running:
                     
                     # TREE INTERACTION
                     if not state.is_editing_metadata and not state.show_axis_selector:
-                        # Logic for clicking metadata inputs is inside draw_metadata_editor in screens.py usually? 
-                        # Actually inputs are drawn there, but click detection is here.
-                        # For the text fields, we check rect collision:
                         if state.is_editing_metadata:
-                             # Re-calculate rects or assume fixed positions from layout
                              pass 
                         else:
                             selected_list = tree_ui.handle_click(event.pos, (20, 80, 800, 600))
@@ -294,7 +373,11 @@ while running:
         
         # --- VIEWPORT NAVIGATION ---
         if current_state == STATE_DASHBOARD:
-            if event.type == pygame.MOUSEWHEEL: tree_ui.handle_zoom("in" if event.y > 0 else "out")
+            if event.type == pygame.MOUSEWHEEL: 
+                if mouse_pos[0] > 840: # Over right panel
+                    state.analysis_scroll_y = max(0, state.analysis_scroll_y - event.y * 20)
+                else:
+                    tree_ui.handle_zoom("in" if event.y > 0 else "out")
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 2: tree_ui.is_panning = True
             if event.type == pygame.MOUSEBUTTONUP and event.button == 2: tree_ui.is_panning = False
             if event.type == pygame.MOUSEMOTION and tree_ui.is_panning: tree_ui.camera_offset += pygame.Vector2(event.rel)
