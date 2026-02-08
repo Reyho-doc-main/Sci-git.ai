@@ -1,26 +1,43 @@
-import time
 import os
+import threading
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-from queue import Queue
 
 class ExperimentHandler(FileSystemEventHandler):
     def __init__(self, event_queue):
         self.queue = event_queue
+        self.timers = {}  # Store active timers: {path: Timer}
+        self.debounce_interval = 2.0  # Wait 2 seconds after LAST write
+        self.marker_file = ".restore_in_progress"
 
-    def on_created(self, event):
-        # Ignore directories and non-csv files
-        if event.is_directory:
+    def on_modified(self, event):
+        if event.is_directory or not (event.src_path.endswith('.csv') or event.src_path.endswith('.xlsx')):
             return
+        # 1. Check for the "Restore" marker in the parent directory
+        # This prevents the app from auto-committing when YOU restore an old version
+        marker_path = os.path.join(os.path.dirname(event.src_path), self.marker_file)
+        if os.path.exists(marker_path):
+            return 
+        # 2. Advanced Debouncing (Reset timer on every event)
+        # If a timer already exists for this file, cancel it (user is still writing)
+        if event.src_path in self.timers:
+            self.timers[event.src_path].cancel()
+        # Start a new timer
+        timer = threading.Timer(self.debounce_interval, self._trigger_event, args=[event.src_path])
+        self.timers[event.src_path] = timer
+        timer.start()
+
+    def _trigger_event(self, path):
+        """Called only when the file has been silent for `debounce_interval`."""
+        # Clean up timer reference
+        if path in self.timers:
+            del self.timers[path]
         
-        filename = event.src_path
-        if filename.endswith('.csv') or filename.endswith('.xlsx'):
-            # Allow file write to finish
-            time.sleep(0.5) 
-            self.queue.put({"type": "NEW_FILE", "path": filename})
+        # Verify file still exists (it might have been deleted during the delay)
+        if os.path.exists(path):
+            self.queue.put({"type": "NEW_FILE", "path": path})
 
 def start_watcher(path_to_watch, event_queue):
-    # Ensure directory exists
     if not os.path.exists(path_to_watch):
         os.makedirs(path_to_watch)
         

@@ -1,9 +1,8 @@
 import matplotlib
-matplotlib.use('Agg')
+matplotlib.use('Agg') # Non-interactive backend (Thread-safe)
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 import seaborn as sns
-import pygame
 import pandas as pd
 import re
 
@@ -32,16 +31,17 @@ class HeaderScanner:
 
 def create_seaborn_surface(df1, df2=None, width=400, height=300, x_col=None, y_col=None):
     """
-    Generates a Seaborn plot.
-    Returns: (pygame_surface, context_dict)
+    Generates a Seaborn plot as RAW BYTES (Thread-safe).
+    Returns: (raw_buffer, size_tuple, context_dict)
     """
     try:
+        # DPI=80 matches the previous sizing logic
         fig = Figure(figsize=(width/80, height/80), dpi=80, facecolor='#16161a')
         canvas = FigureCanvasAgg(fig)
         
         context = {
             "type": "single",
-            "df": df1,
+            "df": df1, # Note: Passing DF back in context is okay for read-only
             "x_col": x_col,
             "y_col": y_col,
             "overlay": False
@@ -54,13 +54,11 @@ def create_seaborn_surface(df1, df2=None, width=400, height=300, x_col=None, y_c
             ax = fig.add_subplot(111)
             ax.set_facecolor('#0d0d0f')
             
-            # Auto-select columns if not provided
+            # Auto-select columns
             numeric_cols = df1.select_dtypes(include=['number']).columns
-            
             final_x = x_col if x_col and x_col in numeric_cols else (numeric_cols[0] if len(numeric_cols) > 0 else None)
             final_y = y_col if y_col and y_col in numeric_cols else (numeric_cols[1] if len(numeric_cols) > 1 else None)
             
-            # Update context with actual used columns
             context["x_col"] = final_x
             context["y_col"] = final_y
 
@@ -77,12 +75,11 @@ def create_seaborn_surface(df1, df2=None, width=400, height=300, x_col=None, y_c
             cols2 = df2.select_dtypes(include=['number']).columns
             common_cols = [c for c in cols1 if c in cols2]
             
-            # Use overrides if compatible, else auto
             use_x = x_col if x_col in common_cols else (common_cols[0] if len(common_cols)>0 else None)
             use_y = y_col if y_col in common_cols else (common_cols[1] if len(common_cols)>1 else None)
             
             if use_x and use_y:
-                # --- OVERLAY MODE ---
+                # OVERLAY
                 context["overlay"] = True
                 context["x_col"] = use_x
                 context["y_col"] = use_y
@@ -93,9 +90,8 @@ def create_seaborn_surface(df1, df2=None, width=400, height=300, x_col=None, y_c
                 sns.lineplot(data=df2, x=use_x, y=use_y, ax=ax, color=line_colors[1], linewidth=2, label="Secondary")
                 ax.set_title("COMPARATIVE OVERLAY", color='#ffffff', fontsize=10, family='monospace')
                 ax.legend(facecolor='#16161a', edgecolor='#333333', labelcolor='white')
-            
             else:
-                # --- SIDE-BY-SIDE MODE ---
+                # SIDE BY SIDE
                 context["overlay"] = False
                 ax1 = fig.add_subplot(211)
                 ax1.set_facecolor('#0d0d0f')
@@ -109,19 +105,19 @@ def create_seaborn_surface(df1, df2=None, width=400, height=300, x_col=None, y_c
                 
                 fig.tight_layout()
 
+        # Styling
         for ax in fig.axes:
             ax.tick_params(colors='#888888', labelsize=8)
             for spine in ax.spines.values():
                 spine.set_edgecolor('#333333')
 
+        # RENDER TO BYTES (Crucial Step)
         canvas.draw()
-        rgba_buffer = canvas.buffer_rgba()
-        surf = pygame.image.frombuffer(rgba_buffer, canvas.get_width_height(), "RGBA")
+        raw_string = canvas.buffer_rgba()
+        size = canvas.get_width_height()
         
-        return surf, context
+        return raw_string, size, context
 
     except Exception as e:
         print(f"Plotting Error: {e}")
-        surf = pygame.Surface((width, height))
-        surf.fill((30, 30, 35))
-        return surf, None
+        return None, (width, height), None
