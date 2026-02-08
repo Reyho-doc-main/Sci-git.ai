@@ -15,8 +15,11 @@ class VersionTree:
         
         # Search & Navigation
         self._search_filter = "" 
-        self.target_offset = None # For smooth snapping
-        self.minimap_rect = None # For click detection
+        
+        # Minimap State
+        self.minimap_rect = None      # The main map area
+        self.minimap_btn_rect = None  # The collapse/expand button
+        self.minimap_internals = {}   # Stores scale/offsets for click logic
 
     @property
     def search_filter(self):
@@ -114,12 +117,6 @@ class VersionTree:
 
         # 1. Handle Dragging Logic
         if self.dragged_node_id is not None:
-            # Convert screen mouse to tree coordinates
-            # Note: mouse_pos is absolute, we need relative to the tree surface (which is usually at 20, 80)
-            # But the caller passes raw mouse_pos. We'll adjust in handle_click, but here we assume logic holds.
-            # Actually, let's simplify: Dragging is updated in handle_click or main loop. 
-            # We'll just check if we need to update connections.
-            
             # Recalculate connections for visual fluidity
             self.connections = []
             pos_lookup = {n["id"]: n["pos"] for n in self.nodes}
@@ -143,8 +140,6 @@ class VersionTree:
             self.draw_arrow(surface, pygame.Vector2(mid_x, e.y), e, (100, 100, 110))
 
         # 3. Draw Nodes
-        font_height = self.font.get_linesize()
-        
         for node in self.nodes:
             draw_pos = (node["pos"] * self.zoom_level) + self.camera_offset
             ix, iy = int(draw_pos.x), int(draw_pos.y)
@@ -189,76 +184,104 @@ class VersionTree:
         """Draws a minimap overlay in the bottom-right of the tree panel."""
         if not self.nodes: return
 
+        # Constants
+        map_w, map_h = 160, 120
+        dest_x = panel_rect.w - map_w - 10
+        dest_y = panel_rect.h - map_h - 10
+        
+        # 1. Draw Collapsed State
         if state.minimap_collapsed:
-            collapse_rect = pygame.Rect(panel_rect.w - 30, panel_rect.h - 30, 20, 20)
-            pygame.draw.rect(surface, UITheme.PANEL_GREY, collapse_rect)
-            pygame.draw.rect(surface, UITheme.ACCENT_ORANGE, collapse_rect, 1)
-            surface.blit(self.font.render("+", True, UITheme.ACCENT_ORANGE), (panel_rect.w - 25, panel_rect.h - 28))
-            self.minimap_rect = collapse_rect # Re-use rect for the expand button
+            self.minimap_rect = None # No map interaction when collapsed
+            self.minimap_btn_rect = pygame.Rect(panel_rect.w - 30, panel_rect.h - 30, 20, 20)
+            
+            pygame.draw.rect(surface, UITheme.PANEL_GREY, self.minimap_btn_rect)
+            pygame.draw.rect(surface, UITheme.ACCENT_ORANGE, self.minimap_btn_rect, 1)
+            surface.blit(self.font.render("+", True, UITheme.ACCENT_ORANGE), (self.minimap_btn_rect.x + 6, self.minimap_btn_rect.y + 2))
             return
 
-        # 1. Calculate Bounds
+        # 2. Draw Expanded State
+        self.minimap_rect = pygame.Rect(dest_x, dest_y, map_w, map_h)
+        self.minimap_btn_rect = pygame.Rect(dest_x + map_w - 20, dest_y - 20, 20, 20)
+        
+        # Draw Collapse Button
+        pygame.draw.rect(surface, (50, 20, 20), self.minimap_btn_rect)
+        surface.blit(self.font.render("_", True, (255, 255, 255)), (self.minimap_btn_rect.x + 6, self.minimap_btn_rect.y - 4))
+
+        # Draw Map Background
+        s = pygame.Surface((map_w, map_h))
+        s.set_alpha(220)
+        s.fill((15, 15, 20))
+        surface.blit(s, (dest_x, dest_y))
+        pygame.draw.rect(surface, UITheme.ACCENT_ORANGE, self.minimap_rect, 1)
+
+        # 3. Calculate Geometry (World -> Map)
         all_x = [n["pos"].x for n in self.nodes]
         all_y = [n["pos"].y for n in self.nodes]
         min_x, max_x = min(all_x), max(all_x)
         min_y, max_y = min(all_y), max(all_y)
         
-        tree_w = max(100, max_x - min_x)
-        tree_h = max(100, max_y - min_y)
+        # Add padding to world bounds so nodes aren't on the edge
+        padding = 100
+        min_x -= padding
+        min_y -= padding
+        max_x += padding
+        max_y += padding
+        
+        world_w = max_x - min_x
+        world_h = max_y - min_y
+        
+        # Avoid division by zero
+        if world_w < 1: world_w = 1
+        if world_h < 1: world_h = 1
 
-        # 2. Setup Minimap Rect
-        map_w, map_h = 160, 120
-        # Position relative to the *Tree Surface*, which is 800x600
-        # We want it bottom-right of that surface
-        dest_x = panel_rect.w - map_w - 10
-        dest_y = panel_rect.h - map_h - 10
-        self.minimap_rect = pygame.Rect(dest_x, dest_y, map_w, map_h)
-
-        btn_close = pygame.Rect(dest_x + map_w - 20, dest_y - 20, 20, 20)
-        pygame.draw.rect(surface, (50, 20, 20), btn_close)
-        surface.blit(self.font.render("_", True, (255, 255, 255)), (btn_close.x + 5, btn_close.y - 5))
-
-        # Background
-        s = pygame.Surface((map_w, map_h))
-        s.set_alpha(200)
-        s.fill((15, 15, 20))
-        surface.blit(s, (dest_x, dest_y))
-        pygame.draw.rect(surface, UITheme.ACCENT_ORANGE, self.minimap_rect, 1)
-
-        # 3. Calculate Scale
-        scale_x = map_w / (tree_w + 200) # + padding
-        scale_y = map_h / (tree_h + 200)
+        # Calculate Scale to fit world inside map
+        scale_x = map_w / world_w
+        scale_y = map_h / world_h
         scale = min(scale_x, scale_y)
+        
+        # Store for click handler
+        self.minimap_internals = {
+            "min_x": min_x, "min_y": min_y,
+            "scale": scale,
+            "dest_x": dest_x, "dest_y": dest_y
+        }
 
         # 4. Draw Nodes (Dots)
         for node in self.nodes:
-            # Normalize to 0,0 relative to tree bounds
-            nx = (node["pos"].x - min_x) + 100
-            ny = (node["pos"].y - min_y) + 100
-            
-            mx = dest_x + (nx * scale)
-            my = dest_y + (ny * scale)
+            # Map Transform: (WorldPos - WorldMin) * Scale + MapOrigin
+            mx = dest_x + (node["pos"].x - min_x) * scale
+            my = dest_y + (node["pos"].y - min_y) * scale
             
             col = UITheme.ACCENT_ORANGE if node["id"] in state.selected_ids else (100, 100, 100)
             if node["branch"] != "main": col = UITheme.NODE_BRANCH
             
-            pygame.draw.circle(surface, col, (mx, my), 2)
-
-            if not self.minimap_rect.collidepoint(mx, my):
-                edge_x = max(self.minimap_rect.left + 5, min(mx, self.minimap_rect.right - 5))
-                edge_y = max(self.minimap_rect.top + 5, min(my, self.minimap_rect.bottom - 5))
-                pygame.draw.circle(surface, UITheme.ACCENT_ORANGE, (edge_x, edge_y), 2)
+            # Simple clipping
+            if self.minimap_rect.collidepoint(mx, my):
+                pygame.draw.circle(surface, col, (mx, my), 2)
 
         # 5. Draw Viewport (Camera)
-        # The camera offset is negative relative to world 0,0 usually.
-        # Viewport TopLeft in World Space = -camera_offset
-        vx = (-self.camera_offset.x - min_x + 100) * scale
-        vy = (-self.camera_offset.y - min_y + 100) * scale
-        vw = (panel_rect.w / self.zoom_level) * scale
-        vh = (panel_rect.h / self.zoom_level) * scale
+        # World Viewport TopLeft = -camera_offset / zoom
+        # World Viewport Size = ScreenSize / zoom
         
-        view_rect = pygame.Rect(dest_x + vx, dest_y + vy, vw, vh)
-        pygame.draw.rect(surface, (255, 255, 255), view_rect, 1)
+        view_world_x = -self.camera_offset.x / self.zoom_level
+        view_world_y = -self.camera_offset.y / self.zoom_level
+        view_world_w = panel_rect.w / self.zoom_level
+        view_world_h = panel_rect.h / self.zoom_level
+        
+        # Convert Viewport World Coords to Map Coords
+        vx = dest_x + (view_world_x - min_x) * scale
+        vy = dest_y + (view_world_y - min_y) * scale
+        vw = view_world_w * scale
+        vh = view_world_h * scale
+        
+        view_rect = pygame.Rect(vx, vy, vw, vh)
+        
+        # Clip the view rect to the minimap bounds so it doesn't bleed out
+        clipped_rect = view_rect.clip(self.minimap_rect)
+        
+        # Only draw if there is an intersection
+        if clipped_rect.w > 0 and clipped_rect.h > 0:
+            pygame.draw.rect(surface, (255, 255, 255), clipped_rect, 1)
 
     def handle_click(self, mouse_pos, panel_rect):
         """
@@ -271,25 +294,31 @@ class VersionTree:
         local_y = mouse_pos[1] - panel_rect[1]
         local_mouse = pygame.Vector2(local_x, local_y)
 
-        # --- ADDED: MINIMAP INTERACTION ---
-        if self.minimap_rect and self.minimap_rect.collidepoint(local_x, local_y):
-            if state.minimap_collapsed or local_y < self.minimap_rect.top:
-                state.minimap_collapsed = not state.minimap_collapsed
-                return None
+        # --- MINIMAP INTERACTION ---
+        # Check Button First
+        if self.minimap_btn_rect and self.minimap_btn_rect.collidepoint(local_x, local_y):
+            state.minimap_collapsed = not state.minimap_collapsed
+            return None
+
+        # Check Map Body (only if expanded)
+        if not state.minimap_collapsed and self.minimap_rect and self.minimap_rect.collidepoint(local_x, local_y):
+            # Retrieve geometry data saved during draw
+            data = self.minimap_internals
+            if not data: return None
             
-            # Teleport Camera: Map click percent to world space
-            rel_click_x = (local_x - self.minimap_rect.x) / self.minimap_rect.w
-            rel_click_y = (local_y - self.minimap_rect.y) / self.minimap_rect.h
+            # Reverse Transform: World = (MapMouse - MapOrigin) / Scale + WorldMin
+            # We want the mouse to be the CENTER of the new view
             
-            all_x = [n["pos"].x for n in self.nodes]
-            all_y = [n["pos"].y for n in self.nodes]
-            min_x, max_x = min(all_x), max(all_x)
-            min_y, max_y = min(all_y), max(all_y)
+            click_map_x = local_x - data["dest_x"]
+            click_map_y = local_y - data["dest_y"]
             
-            world_target_x = min_x + (rel_click_x * (max_x - min_x))
-            world_target_y = min_y + (rel_click_y * (max_y - min_y))
+            target_world_x = (click_map_x / data["scale"]) + data["min_x"]
+            target_world_y = (click_map_y / data["scale"]) + data["min_y"]
             
-            self.camera_offset = pygame.Vector2(panel_rect[2]/2, panel_rect[3]/2) - (pygame.Vector2(world_target_x, world_target_y) * self.zoom_level)
+            # Set Camera Offset: ScreenCenter - (TargetWorld * Zoom)
+            screen_center = pygame.Vector2(panel_rect[2]/2, panel_rect[3]/2)
+            self.camera_offset = screen_center - (pygame.Vector2(target_world_x, target_world_y) * self.zoom_level)
+            
             return None
 
         # 3. Check Node Click
@@ -319,10 +348,6 @@ class VersionTree:
             # Start Dragging
             self.dragged_node_id = clicked_node
             return state.selected_ids
-        
-        # 4. Handle Dragging Movement (Called every frame via main loop if mouse is down)
-        # Note: Actual movement logic is easier in draw() or a separate update() 
-        # but for this structure, we handle "start drag" here.
         
         return None
 

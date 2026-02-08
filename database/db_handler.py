@@ -97,16 +97,16 @@ class DBHandler:
             cursor.execute("SELECT * FROM experiments WHERE id = ?", (exp_id,))
             return cursor.fetchone()
 
-    def update_metadata(self, exp_id, notes, temp, sample_id):
-        """Saves scientist's manual edits to metadata fields."""
+    def update_metadata(self, exp_id, notes):
+        """Saves scientist's manual edits to notes."""
         query = """
         UPDATE experiments 
-        SET notes = ?, temperature = ?, sample_id = ? 
+        SET notes = ?
         WHERE id = ?
         """
         with self.lock:
             cursor = self.conn.cursor()
-            cursor.execute(query, (notes, temp, sample_id, exp_id))
+            cursor.execute(query, (notes, exp_id))
             self.conn.commit()
 
     def update_plot_settings(self, exp_id, x_col, y_col):

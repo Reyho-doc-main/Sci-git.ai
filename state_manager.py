@@ -1,3 +1,4 @@
+# --- FILE: state_manager.py ---
 class AppState:
     def __init__(self):
         # Core identifiers
@@ -36,10 +37,9 @@ class AppState:
         # GLOBAL INPUT STATE
         self.search_text = ""
         self.search_active = False
+        
+        # METADATA STATE (Simplified)
         self.meta_input_notes = ""
-        self.meta_input_temp = ""
-        self.meta_input_sid = ""
-        self.active_field = "notes"
         
         # APP FLOW
         self.researcher_name = ""

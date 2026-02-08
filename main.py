@@ -1,4 +1,3 @@
-# --- FILE: main.py ---
 import pygame
 import os
 import sys
@@ -67,25 +66,18 @@ def load_database_safe(path):
 def save_editor_changes():
     if not state.selected_ids: return
     
-    # --- CRITICAL FIX: Commit pending buffer before saving ---
-    # If the user is still "editing" a cell (typing) and clicks Save, 
-    # the value is in 'editor_input_buffer', not the DataFrame yet.
+    # Commit pending buffer before saving
     if state.editor_selected_cell:
         r, c = state.editor_selected_cell
         try:
-            # Try converting to float if possible
             val = float(state.editor_input_buffer)
             state.editor_df.iloc[r, c] = val
         except ValueError:
-            # Fallback to string
             state.editor_df.iloc[r, c] = state.editor_input_buffer
-        # Clear selection so we know it's committed
         state.editor_selected_cell = None
 
     state.status_msg = "SAVING & VERSIONING..."
     
-    # Delegate to worker to avoid UI freeze and handle hashing
-    # We pass a copy of the dataframe to ensure thread safety
     task_manager.add_task(worker_ctrl.worker_save_editor_changes, [
         state.selected_ids[0], 
         state.editor_file_path, 
@@ -96,41 +88,22 @@ def save_editor_changes():
 def perform_undo():
     if not state.selected_ids: return
     node_id = state.selected_ids[0]
-    
-    # Check if we have history locally or in DB (DB check happens in worker)
-    # Get file path from DB for safety
     raw = db.get_experiment_by_id(node_id)
     if not raw: return
-    
     state.status_msg = "UNDOING..."
-    task_manager.add_task(worker_ctrl.worker_undo, [
-        node_id,
-        raw[3], # File path
-        state.selected_project_path,
-        state.redo_stack.get(node_id, [])
-    ])
+    task_manager.add_task(worker_ctrl.worker_undo, [node_id, raw[3], state.selected_project_path, state.redo_stack.get(node_id, [])])
 
 def perform_redo():
     if not state.selected_ids: return
     node_id = state.selected_ids[0]
-    
     if node_id not in state.redo_stack or not state.redo_stack[node_id]:
         state.status_msg = "NOTHING TO REDO"
         return
-
     raw = db.get_experiment_by_id(node_id)
     if not raw: return
-
-    # Pop the hash here to get the target hash
     redo_hash = state.redo_stack[node_id].pop()
-    
     state.status_msg = "REDOING..."
-    task_manager.add_task(worker_ctrl.worker_redo, [
-        node_id,
-        raw[3],
-        state.selected_project_path,
-        redo_hash
-    ])
+    task_manager.add_task(worker_ctrl.worker_redo, [node_id, raw[3], state.selected_project_path, redo_hash])
 
 # ==============================================================================
 # GAME LOOP
@@ -140,23 +113,14 @@ while running:
     mouse_pos = pygame.mouse.get_pos()
     events = pygame.event.get()
     
-    # Process Task Results
     task_manager.process_results()
     
-    # --- POST-PROCESSING VISUAL UPDATES ---
-    # If a save/undo/redo just finished, we need to reload the plot/data 
-    # to show the user the result immediately.
     if not state.is_processing:
         if "VERSION SAVED" in state.status_msg or "RESTORED" in state.status_msg:
              if state.selected_ids:
-                 # Trigger a reload of the current experiment to refresh plot/stats
                  task_manager.add_task(worker_ctrl.worker_load_experiment, [state.selected_ids])
-                 
-                 # Update status so we don't loop forever
-                 if "VERSION SAVED" in state.status_msg: 
-                     state.status_msg = "SAVED."
-                 elif "RESTORED" in state.status_msg:
-                     state.status_msg = "READY."
+                 if "VERSION SAVED" in state.status_msg: state.status_msg = "SAVED."
+                 elif "RESTORED" in state.status_msg: state.status_msg = "READY."
     
     if not event_queue.empty() and not state.is_processing and worker_ctrl:
         ev = event_queue.get()
@@ -170,9 +134,34 @@ while running:
         
         # --- EDITOR KEYBOARD INPUT ---
         if current_state == STATE_EDITOR and event.type == pygame.KEYDOWN:
-            if state.editor_selected_cell:
+            if event.key in [pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT]:
+                # 1. Commit current buffer if valid
+                if state.editor_selected_cell:
+                    r, c = state.editor_selected_cell
+                    try: state.editor_df.iloc[r, c] = float(state.editor_input_buffer)
+                    except: state.editor_df.iloc[r, c] = state.editor_input_buffer
+                
+                # 2. Determine new pos
+                if not state.editor_selected_cell:
+                    new_r, new_c = 0, 0
+                else:
+                    r, c = state.editor_selected_cell
+                    new_r, new_c = r, c
+                    if event.key == pygame.K_UP: new_r = max(0, r - 1)
+                    elif event.key == pygame.K_DOWN: new_r = min(len(state.editor_df)-1, r + 1)
+                    elif event.key == pygame.K_LEFT: new_c = max(0, c - 1)
+                    elif event.key == pygame.K_RIGHT: new_c = min(len(state.editor_df.columns)-1, c + 1)
+                
+                # 3. Apply & Scroll
+                state.editor_selected_cell = (new_r, new_c)
+                state.editor_input_buffer = str(state.editor_df.iloc[new_r, new_c])
+                
+                # Auto-Scroll Logic (15 is visible row count)
+                if new_r < state.editor_scroll_y: state.editor_scroll_y = new_r
+                if new_r >= state.editor_scroll_y + 15: state.editor_scroll_y = new_r - 14
+
+            elif state.editor_selected_cell:
                 if event.key == pygame.K_RETURN:
-                    # Commit change
                     r, c = state.editor_selected_cell
                     try:
                         val = float(state.editor_input_buffer)
@@ -184,8 +173,7 @@ while running:
                     state.editor_input_buffer = state.editor_input_buffer[:-1]
                 else:
                     state.editor_input_buffer += event.unicode
-            elif event.key == pygame.K_DOWN: state.editor_scroll_y = max(0, state.editor_scroll_y - 1)
-            elif event.key == pygame.K_UP: state.editor_scroll_y += 1
+
         if event.type == pygame.KEYDOWN:
             keys = pygame.key.get_pressed()
             if keys[pygame.K_LCTRL] and event.key == pygame.K_z and current_state == STATE_DASHBOARD:
@@ -276,7 +264,7 @@ while running:
                         state.is_editing_metadata = not state.is_editing_metadata
                     
                     elif state.is_editing_metadata and layout.btn_save_meta.check_hover(mouse_pos):
-                        db.update_metadata(state.selected_ids[0], state.meta_input_notes, state.meta_input_temp, state.meta_input_sid)
+                        db.update_metadata(state.selected_ids[0], state.meta_input_notes)
                         state.is_editing_metadata = False
                         task_manager.add_task(worker_ctrl.worker_load_experiment, [state.selected_ids])
                     
@@ -360,16 +348,10 @@ while running:
                 tree_ui.search_filter = state.search_text
             elif state.is_editing_metadata:
                 if event.key == pygame.K_BACKSPACE:
-                    if state.active_field == "notes": state.meta_input_notes = state.meta_input_notes[:-1]
-                    elif state.active_field == "temp": state.meta_input_temp = state.meta_input_temp[:-1]
-                    elif state.active_field == "sid": state.meta_input_sid = state.meta_input_sid[:-1]
-                elif event.key == pygame.K_TAB:
-                    state.active_field = "temp" if state.active_field == "notes" else ("sid" if state.active_field == "temp" else "notes")
+                    state.meta_input_notes = state.meta_input_notes[:-1]
                 else:
                     if event.unicode.isprintable():
-                        if state.active_field == "notes": state.meta_input_notes += event.unicode
-                        elif state.active_field == "temp": state.meta_input_temp += event.unicode
-                        elif state.active_field == "sid": state.meta_input_sid += event.unicode
+                        state.meta_input_notes += event.unicode
         
         # --- VIEWPORT NAVIGATION ---
         if current_state == STATE_DASHBOARD:

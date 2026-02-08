@@ -1,8 +1,8 @@
 import os
 import json
 import pandas as pd
-from pydantic import BaseModel
-from typing import List
+from pydantic import BaseModel, field_validator
+from typing import List, Any
 from openai import AzureOpenAI
 from dotenv import load_dotenv
 from state_manager import state
@@ -15,6 +15,14 @@ class ExperimentSchema(BaseModel):
     next_steps: str
     is_reproducible: bool
     ai_generated: bool = True
+
+    # --- FIX: Handle AI returning list instead of string ---
+    @field_validator('next_steps', mode='before')
+    @classmethod
+    def flatten_list_to_string(cls, v: Any) -> str:
+        if isinstance(v, list):
+            return " ".join(str(x) for x in v)
+        return str(v) if v is not None else ""
 
 class ScienceAI:
     def __init__(self):
@@ -49,35 +57,32 @@ class ScienceAI:
                 is_reproducible=False
             )
         
-        if df.empty or len(df.columns) < 2:
-            return ExperimentSchema(
-                summary="There is a lack of data provided for an accurate AI analysis. Please provide more data.",
-                anomalies=["INSUFFICIENT_DATA"],
-                next_steps="Provide more data.",
-                is_reproducible=False
-            )
-
         if state.stop_ai_requested:
             state.stop_ai_requested = False
             return self._local_analysis(df)
         
         if self.client:
             try:
+                # Limit tokens to prevent lag/timeout
                 csv_snippet = df.head(15).to_csv()
                 prompt = f"Analyze this experimental data and return JSON:\n{csv_snippet}"
                 response = self.client.chat.completions.create(
                     model=self.deployment,
                     messages=[
-                        {"role": "system", "content": "You are a scientific data analyzer. Return strictly valid JSON with keys: summary, anomalies, next_steps, is_reproducible."},
+                        {"role": "system", "content": "You are a scientific data analyzer. Return strictly valid JSON with keys: summary, anomalies (list of strings), next_steps (single string), is_reproducible (bool)."},
                         {"role": "user", "content": prompt}
                     ],
                     response_format={"type": "json_object"}
                 )
                 data = json.loads(response.choices[0].message.content)
                 data["ai_generated"] = True
+                
+                # Pydantic validation (now with validator)
                 return ExperimentSchema(**data)
             except Exception as e:
                 print(f"AI Error: {e}")
+                # Fallthrough to local analysis on error
+        
         return self._local_analysis(df)
 
     def compare_experiments(self, df1: pd.DataFrame, df2: pd.DataFrame) -> dict:
@@ -115,7 +120,13 @@ class ScienceAI:
 
     def _local_analysis(self, df):
         cols = df.select_dtypes(include=['number']).columns
-        return ExperimentSchema(summary=f"Local Analysis: {len(cols)} numeric columns.", anomalies=[], next_steps="Check AI connection.", is_reproducible=True, ai_generated=False)
+        return ExperimentSchema(
+            summary=f"Local Analysis: {len(cols)} numeric columns detected. AI unavailable.", 
+            anomalies=[], 
+            next_steps="Check AI connection or API Key.", 
+            is_reproducible=True, 
+            ai_generated=False
+        )
 
     def _local_comparison(self, df1, df2, cols):
         return {"summary": "AI Offline. Manual comparison required.", "anomalies": []}

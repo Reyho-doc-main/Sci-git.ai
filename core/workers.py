@@ -53,7 +53,7 @@ class WorkerController:
                         "data": {
                             "plot_data": (plot_bytes, size, context),
                             "analysis": json.loads(raw[4]),
-                            "metadata": {"notes": raw[8], "temp": raw[9], "sid": raw[10]},
+                            "metadata": {"notes": raw[8]},
                             "status": status_note
                         }
                     }
@@ -257,8 +257,6 @@ class TaskQueue:
                 if 'analysis' in data: state.current_analysis = data['analysis']
                 if 'metadata' in data:
                     state.meta_input_notes = data['metadata'].get('notes', "") or ""
-                    state.meta_input_temp = data['metadata'].get('temp', "") or ""
-                    state.meta_input_sid = data['metadata'].get('sid', "") or ""
                 if 'status' in data: state.status_msg = data['status']
                 state.is_processing = False
 

@@ -75,7 +75,7 @@ class RenderEngine:
         pygame.draw.rect(self.screen, UITheme.PANEL_GREY, (0, 0, 1280, 60))
         filename = os.path.basename(state.editor_file_path) if state.editor_file_path else "Unknown"
         self.screen.blit(self.font_bold.render(f"EDITING: {filename}", True, UITheme.ACCENT_ORANGE), (20, 20))
-        self.screen.blit(self.font_main.render("Use Arrow Keys to Scroll | Enter to Confirm Cell | Save to Commit", True, UITheme.TEXT_DIM), (500, 22))
+        self.screen.blit(self.font_main.render("Arrow Keys to Navigate | Enter to Confirm | Save to Commit", True, UITheme.TEXT_DIM), (500, 22))
 
         # Spreadsheet Logic
         start_x, start_y = 50, 100
@@ -214,16 +214,10 @@ class RenderEngine:
                 
                 # Metadata notes drawn below summary
                 if len(state.selected_ids) == 1:
-                    meta_txt = f"\nRESEARCH NOTES:\n{state.meta_input_notes}\nTEMP: {state.meta_input_temp} | ID: {state.meta_input_sid}"
+                    meta_txt = f"\nRESEARCH NOTES:\n{state.meta_input_notes}"
                     UITheme.render_terminal_text(self.screen, meta_txt, (855, y_pos + h), self.font_main, UITheme.ACCENT_ORANGE, 380)
                 
                 self.screen.set_clip(None) # Reset clip
-                
-                UITheme.render_terminal_text(self.screen, state.current_analysis.get('summary', ""), (855, 420), self.font_main, UITheme.TEXT_OFF_WHITE, 390)
-                if len(state.selected_ids) == 1:
-                    meta_txt = f"NOTE: {state.meta_input_notes}\nTEMP: {state.meta_input_temp} | ID: {state.meta_input_sid}"
-                    if state.meta_input_notes or state.meta_input_temp:
-                        UITheme.render_terminal_text(self.screen, meta_txt, (855, 550), self.font_main, UITheme.ACCENT_ORANGE, 390)
         else:
             # METADATA EDITOR
             self.draw_metadata_editor(mouse_pos)
@@ -289,19 +283,18 @@ class RenderEngine:
             y_off += 25
 
     def draw_metadata_editor(self, mouse_pos):
-        self.screen.blit(self.font_bold.render("MANUAL DATA ENTRY", True, UITheme.ACCENT_ORANGE), (855, 100))
-        y_ptr = 150
-        for label, key in [("NOTES:", "notes"), ("TEMP (°C):", "temp"), ("SAMPLE ID:", "sid")]:
-            self.screen.blit(self.font_main.render(label, True, UITheme.TEXT_DIM), (855, y_ptr))
-            rect = pygame.Rect(855, y_ptr + 20, 390, 35)
-            pygame.draw.rect(self.screen, (10, 10, 15), rect)
-            
-            is_active = state.active_field == key
-            pygame.draw.rect(self.screen, (UITheme.ACCENT_ORANGE if is_active else (50, 50, 60)), rect, 1)
-            
-            val = state.meta_input_notes if key == "notes" else (state.meta_input_temp if key == "temp" else state.meta_input_sid)
-            self.screen.blit(self.font_main.render(val + ("|" if is_active else ""), True, (255, 255, 255)), (860, y_ptr + 28))
-            y_ptr += 80
+        self.screen.blit(self.font_bold.render("PROJECT NOTES", True, UITheme.ACCENT_ORANGE), (855, 100))
+        
+        self.screen.blit(self.font_main.render("Type to add observations...", True, UITheme.TEXT_DIM), (855, 130))
+        
+        # Single Large Text Area
+        rect = pygame.Rect(855, 160, 390, 300)
+        pygame.draw.rect(self.screen, (10, 10, 15), rect)
+        pygame.draw.rect(self.screen, UITheme.ACCENT_ORANGE, rect, 1)
+        
+        # Render Text wrapped
+        UITheme.render_terminal_text(self.screen, state.meta_input_notes + "|", (860, 165), self.font_main, (255, 255, 255), 380)
+
         layout.btn_save_meta.check_hover(mouse_pos)
         layout.btn_save_meta.draw(self.screen, self.font_main)
 
