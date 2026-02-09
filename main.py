@@ -109,6 +109,24 @@ def perform_redo():
     state.processing_mode = "LOCAL"
     task_manager.add_task(worker_ctrl.worker_redo, [node_id, raw[3], state.selected_project_path, redo_hash])
 
+def open_editor_for_selected():
+    global current_state
+    if len(state.selected_ids) != 1:
+        state.status_msg = "SELECT 1 FILE TO EDIT"
+        return
+    raw = db.get_experiment_by_id(state.selected_ids[0])
+    if not raw:
+        state.status_msg = "ERROR: FILE NOT FOUND"
+        return
+    state.editor_file_path = raw[3]
+    try:
+        state.editor_df = pd.read_csv(state.editor_file_path)
+        current_state = STATE_EDITOR
+        state.editor_selected_cell = None
+        state.status_msg = "EDITING MODE ACTIVE"
+    except Exception:
+        state.status_msg = "ERROR OPENING FILE"
+
 # ==============================================================================
 # GAME LOOP
 # ==============================================================================
@@ -276,6 +294,24 @@ while running:
 
                 else:
                     # BUTTON CLICKS (Referring to layout object)
+                    # --- EDIT DROPDOWN HANDLING ---
+                    # 1) Click EDIT -> toggle dropdown (and STOP it from opening editor directly)
+                    if layout.btn_menu_edit.check_hover(mouse_pos):
+                        state.show_edit_dropdown = not state.show_edit_dropdown
+                        continue  # important: prevents the old direct-open logic below from running
+
+                    # 2) If dropdown open, handle click on EDIT FILE
+                    if state.show_edit_dropdown:
+                        if layout.dd_edit_file.check_hover(mouse_pos):
+                            state.show_edit_dropdown = False
+                            open_editor_for_selected()
+                            continue
+
+                        # 3) Click outside -> close dropdown
+                        dd_area = pygame.Rect(88, 66, 114, 24)
+                        if not dd_area.collidepoint(mouse_pos):
+                            state.show_edit_dropdown = False
+
                     if layout.btn_menu_analyze.check_hover(mouse_pos):
                         state.processing_mode = "AI"
                         if len(state.selected_ids) == 1:
@@ -285,17 +321,17 @@ while running:
                             state.status_msg = "ANALYZING BRANCH (NANO)..."
                             task_manager.add_task(worker_ctrl.worker_analyze_branch, [state.active_branch])
                     
-                    if layout.btn_menu_edit.check_hover(mouse_pos):
-                        if len(state.selected_ids) == 1:
-                            raw = db.get_experiment_by_id(state.selected_ids[0])
-                            state.editor_file_path = raw[3]
-                            try:
-                                state.editor_df = pd.read_csv(state.editor_file_path)
-                                current_state = STATE_EDITOR
-                                state.editor_selected_cell = None
-                                state.status_msg = "EDITING MODE ACTIVE"
-                            except Exception as e:
-                                state.status_msg = "ERROR OPENING FILE"
+                    # if layout.btn_menu_edit.check_hover(mouse_pos):
+                    #     if len(state.selected_ids) == 1:
+                    #         raw = db.get_experiment_by_id(state.selected_ids[0])
+                    #         state.editor_file_path = raw[3]
+                    #         try:
+                    #             state.editor_df = pd.read_csv(state.editor_file_path)
+                    #             current_state = STATE_EDITOR
+                    #             state.editor_selected_cell = None
+                    #             state.status_msg = "EDITING MODE ACTIVE"
+                    #         except Exception as e:
+                    #             state.status_msg = "ERROR OPENING FILE"
 
                     if layout.btn_menu_file.check_hover(mouse_pos):
                         state.processing_mode = "LOCAL"

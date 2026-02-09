@@ -231,6 +231,14 @@ class RenderEngine:
         for b in [layout.btn_menu_file, layout.btn_menu_edit, layout.btn_menu_analyze, layout.btn_undo, layout.btn_redo]:
             b.check_hover(mouse_pos)
             b.draw(self.screen, self.font_small)
+        # EDIT DROPDOWN (Edit File only)
+        if state.show_edit_dropdown and not state.show_ai_popup:
+            dd_rect = pygame.Rect(88, 66, 114, 24)  # background box for dropdown
+            pygame.draw.rect(self.screen, (25, 25, 35), dd_rect)
+            pygame.draw.rect(self.screen, (70, 70, 90), dd_rect, 1)
+
+            layout.dd_edit_file.check_hover(mouse_pos)
+            layout.dd_edit_file.draw(self.screen, self.font_small)
 
         # SEARCH BAR
         search_rect = pygame.Rect(850, 45, 200, 20)
