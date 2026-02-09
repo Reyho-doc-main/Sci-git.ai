@@ -31,16 +31,19 @@ class UILayout:
 
         # MENU
         self.btn_menu_file = Button(20, 45, 60, 20, "FILE", UITheme.PANEL_GREY)
-        self.btn_menu_edit = Button(90, 45, 100, 20, "EDIT FILE", UITheme.PANEL_GREY)
+        self.btn_menu_edit = Button(90, 45, 100, 20, "EDIT", UITheme.PANEL_GREY)
         self.btn_menu_analyze = Button(200, 45, 80, 20, "AI ANALYSIS", UITheme.PANEL_GREY) # Renamed to AI
         self.btn_toggle_ai = Button(1100, 45, 150, 20, "AI ASSISTANT", (100, 0, 255))
+        
+        # EDIT DROPDOWN ITEM (under Edit Menu)
+        self.dd_edit_file = Button(90, 68, 110, 20, "EDIT FILE", UITheme.PANEL_GREY)
         
         # EDITOR
         self.btn_editor_save = Button(1050, 650, 200, 40, "SAVE CHANGES", (0, 180, 100))
         self.btn_editor_exit = Button(20, 650, 150, 40, "CANCEL", (200, 50, 50))
 
-        self.btn_undo = Button(300, 10, 80, 25, "UNDO [^Z]", (60, 60, 70))
-        self.btn_redo = Button(390, 10, 80, 25, "REDO [^Y]", (60, 60, 70))
+        self.btn_undo = Button(300, 45, 80, 20, "UNDO [^Z]", (60, 60, 70))
+        self.btn_redo = Button(390, 45, 80, 20, "REDO [^Y]", (60, 60, 70))
 
         # AI LOADING
         self.btn_ai_stop = Button(SCREEN_CENTER_X - 100, 500, 200, 50, "ABORT SEQUENCE", (200, 50, 50))

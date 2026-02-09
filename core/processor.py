@@ -4,21 +4,35 @@ import pandas as pd
 from settings import UITheme
 
 class PDFReport(FPDF):
+    def __init__(self):
+        super().__init__()
+
+        self.add_font(
+            "DejaVu", "",
+            os.path.join("pdfFonts", "DejaVuSans.ttf"),
+            uni=True
+        )
+        self.add_font(
+            "DejaVu", "B",
+            os.path.join("pdfFonts", "DejaVuSans-Bold.ttf"),
+            uni=True
+        )
+
     def header(self):
-        self.set_font('Courier', 'B', 12)
+        self.set_font('DejaVu', 'B', 12)
         self.cell(0, 10, 'SCI-GIT // AUTOMATED RESEARCH LOG', 0, 1, 'R')
         self.line(10, 20, 200, 20)
         self.ln(10)
 
     def footer(self):
         self.set_y(-15)
-        self.set_font('Courier', 'I', 8)
+        self.set_font('DejaVu', '', 8)
         self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
 
 def export_to_report(filename, analysis_dict, branch_name, plot_image_path=None):
     pdf = PDFReport()
     pdf.add_page()
-    pdf.set_font("Courier", "B", 16)
+    pdf.set_font("DejaVu", "B", 16)
     pdf.cell(0, 10, f"EXPERIMENTAL REPORT: {branch_name}", ln=True, align='L')
     pdf.ln(5)
     
@@ -26,21 +40,31 @@ def export_to_report(filename, analysis_dict, branch_name, plot_image_path=None)
         pdf.image(plot_image_path, x=10, w=190)
         pdf.ln(5)
     
-    pdf.set_font("Courier", "B", 12)
+    pdf.set_font("DejaVu", "B", 12)
     pdf.cell(0, 10, "AI ANALYSIS SUMMARY:", ln=True)
-    pdf.set_font("Courier", "", 11)
+    pdf.set_font("DejaVu", "", 11)
     summary_text = analysis_dict.get('summary', 'No summary available.')
     pdf.multi_cell(0, 6, summary_text)
     pdf.ln(5)
     
     anomalies = analysis_dict.get('anomalies', [])
     if anomalies:
-        pdf.set_font("Courier", "B", 12)
+        pdf.set_font("DejaVu", "B", 12)
         pdf.cell(0, 10, "DETECTED ANOMALIES:", ln=True)
-        pdf.set_font("Courier", "", 11)
-        for item in anomalies:
-            pdf.cell(0, 6, f"[!] {item}", ln=True)
-    
+        pdf.set_font("DejaVu", "", 11)
+
+        for i, item in enumerate(anomalies, start=1):
+            pdf.multi_cell(0, 6, f"{i}. {item}")  # wraps
+            pdf.ln(1)
+
+    next_steps = analysis_dict.get("next_steps", "")
+    if next_steps:
+        pdf.ln(2)
+        pdf.set_font("DejaVu", "B", 12)
+        pdf.cell(0, 10, "NEXT STEPS:", ln=True)
+        pdf.set_font("DejaVu", "", 11)
+        pdf.multi_cell(0, 6, next_steps)  # wraps
+
     try:
         pdf.output(filename)
         return True

@@ -109,6 +109,24 @@ def perform_redo():
     state.processing_mode = "LOCAL"
     task_manager.add_task(worker_ctrl.worker_redo, [node_id, raw[3], state.selected_project_path, redo_hash])
 
+def open_editor_for_selected():
+    global current_state
+    if len(state.selected_ids) != 1:
+        state.status_msg = "SELECT 1 FILE TO EDIT"
+        return
+    raw = db.get_experiment_by_id(state.selected_ids[0])
+    if not raw:
+        state.status_msg = "ERROR: FILE NOT FOUND"
+        return
+    state.editor_file_path = raw[3]
+    try:
+        state.editor_df = pd.read_csv(state.editor_file_path)
+        current_state = STATE_EDITOR
+        state.editor_selected_cell = None
+        state.status_msg = "EDITING MODE ACTIVE"
+    except Exception:
+        state.status_msg = "ERROR OPENING FILE"
+
 # ==============================================================================
 # GAME LOOP
 # ==============================================================================
@@ -237,7 +255,12 @@ while running:
                             path = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF", "*.pdf")])
                             if path:
                                 try:
-                                    export_to_report(path, state.ai_popup_data, "AI_SUMMARY_EXPORT")
+                                    temp_img = "temp_plot_export.png"
+                                    if state.current_plot:
+                                        pygame.image.save(state.current_plot, temp_img)
+                                    export_to_report(path, state.ai_popup_data, "AI_SUMMARY_EXPORT", temp_img if os.path.exists(temp_img) else None)
+                                    if os.path.exists(temp_img):
+                                        os.remove(temp_img)
                                     state.status_msg = "PDF SAVED."
                                 except Exception as e:
                                     state.status_msg = f"ERROR: {e}"
@@ -276,6 +299,24 @@ while running:
 
                 else:
                     # BUTTON CLICKS (Referring to layout object)
+                    # --- EDIT DROPDOWN HANDLING ---
+                    # 1) Click EDIT -> toggle dropdown (and STOP it from opening editor directly)
+                    if layout.btn_menu_edit.check_hover(mouse_pos):
+                        state.show_edit_dropdown = not state.show_edit_dropdown
+                        continue  # important: prevents the old direct-open logic below from running
+
+                    # 2) If dropdown open, handle click on EDIT FILE
+                    if state.show_edit_dropdown:
+                        if layout.dd_edit_file.check_hover(mouse_pos):
+                            state.show_edit_dropdown = False
+                            open_editor_for_selected()
+                            continue
+
+                        # 3) Click outside -> close dropdown
+                        dd_area = pygame.Rect(88, 66, 114, 24)
+                        if not dd_area.collidepoint(mouse_pos):
+                            state.show_edit_dropdown = False
+
                     if layout.btn_menu_analyze.check_hover(mouse_pos):
                         state.processing_mode = "AI"
                         if len(state.selected_ids) == 1:
@@ -285,17 +326,17 @@ while running:
                             state.status_msg = "ANALYZING BRANCH (NANO)..."
                             task_manager.add_task(worker_ctrl.worker_analyze_branch, [state.active_branch])
                     
-                    if layout.btn_menu_edit.check_hover(mouse_pos):
-                        if len(state.selected_ids) == 1:
-                            raw = db.get_experiment_by_id(state.selected_ids[0])
-                            state.editor_file_path = raw[3]
-                            try:
-                                state.editor_df = pd.read_csv(state.editor_file_path)
-                                current_state = STATE_EDITOR
-                                state.editor_selected_cell = None
-                                state.status_msg = "EDITING MODE ACTIVE"
-                            except Exception as e:
-                                state.status_msg = "ERROR OPENING FILE"
+                    # if layout.btn_menu_edit.check_hover(mouse_pos):
+                    #     if len(state.selected_ids) == 1:
+                    #         raw = db.get_experiment_by_id(state.selected_ids[0])
+                    #         state.editor_file_path = raw[3]
+                    #         try:
+                    #             state.editor_df = pd.read_csv(state.editor_file_path)
+                    #             current_state = STATE_EDITOR
+                    #             state.editor_selected_cell = None
+                    #             state.status_msg = "EDITING MODE ACTIVE"
+                    #         except Exception as e:
+                    #             state.status_msg = "ERROR OPENING FILE"
 
                     if layout.btn_menu_file.check_hover(mouse_pos):
                         state.processing_mode = "LOCAL"
@@ -417,6 +458,10 @@ while running:
         
         # --- VIEWPORT NAVIGATION ---
         if current_state == STATE_DASHBOARD:
+                # --- AI POPUP SCROLL ---
+            if event.type == pygame.MOUSEWHEEL and state.show_ai_popup:
+                state.ai_popup_scroll_y = max(0, state.ai_popup_scroll_y - event.y * 30)
+                continue  # prevent zoom / panel scroll underneath
             if event.type == pygame.MOUSEWHEEL: 
                 if mouse_pos[0] > 840: # Over right panel
                     state.analysis_scroll_y = max(0, state.analysis_scroll_y - event.y * 20)

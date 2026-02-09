@@ -179,17 +179,97 @@ class RenderEngine:
         self.screen.blit(self.font_header.render("AI ANALYSIS REPORT", True, (255, 255, 255)), (x + 20, y + 20))
         
         # Content
-        if state.ai_popup_data:
-            summary = state.ai_popup_data.get('summary', "No Data.")
-            # Wrap and render text inside the box
-            UITheme.render_terminal_text(self.screen, summary, (x + 30, y + 80), self.font_main, UITheme.TEXT_OFF_WHITE, w - 60)
+        # if state.ai_popup_data:
+        #     summary = state.ai_popup_data.get('summary', "No Data.")
+        #     # Wrap and render text inside the box
+        #     UITheme.render_terminal_text(self.screen, summary, (x + 30, y + 80), self.font_main, UITheme.TEXT_OFF_WHITE, w - 60)
             
-            # Anomalies
-            anomalies = state.ai_popup_data.get('anomalies', [])
-            if anomalies:
-                self.screen.blit(self.font_bold.render("DETECTED ANOMALIES:", True, (255, 50, 50)), (x + 30, y + 350))
-                anom_txt = ", ".join(anomalies)
-                self.screen.blit(self.font_main.render(anom_txt, True, (255, 100, 100)), (x + 30, y + 380))
+        #     # Anomalies
+        #     anomalies = state.ai_popup_data.get('anomalies', [])
+        #     if anomalies:
+        #         self.screen.blit(self.font_bold.render("DETECTED ANOMALIES:", True, (255, 50, 50)), (x + 30, y + 350))
+        #         anom_txt = ", ".join(anomalies)
+        #         self.screen.blit(self.font_main.render(anom_txt, True, (255, 100, 100)), (x + 30, y + 380))
+        
+        # Content area (scrollable style if you want later)
+        content_x = x + 30
+        content_y = y + 80
+        content_w = w - 60
+        content_h = h - 160  # leave space for buttons
+
+        content_rect = pygame.Rect(content_x, content_y, content_w, content_h)
+        pygame.draw.rect(self.screen, (20, 20, 25), content_rect, border_radius=6)
+        pygame.draw.rect(self.screen, (50, 50, 55), content_rect, 1, border_radius=6)
+
+        self.screen.set_clip(content_rect)
+
+        # --- SCROLL STATE ---
+        if not hasattr(state, "ai_popup_scroll_y"):
+            state.ai_popup_scroll_y = 0
+
+        scroll_y = state.ai_popup_scroll_y
+
+        # Start cursor with scroll offset applied
+        y_cursor = content_y + 10 - scroll_y
+        content_start_y = content_y + 10  # for height calculation later
+
+        data = state.ai_popup_data or {}
+
+        # --- SUMMARY ---
+        summary = data.get("summary", "No Data.")
+        self.screen.blit(self.font_bold.render("SUMMARY", True, UITheme.ACCENT_ORANGE), (content_x, y_cursor))
+        y_cursor += 28
+        y_cursor += UITheme.render_terminal_text(
+            self.screen,
+            summary,
+            (content_x, y_cursor),
+            self.font_main,
+            UITheme.TEXT_OFF_WHITE,
+            content_w
+        ) + 12
+
+        # --- ANOMALIES ---
+        anomalies = data.get("anomalies", []) or []
+        if anomalies:
+            self.screen.blit(self.font_bold.render("DETECTED ANOMALIES", True, (255, 60, 60)), (content_x, y_cursor))
+            y_cursor += 28
+
+            for idx, item in enumerate(anomalies, start=1):
+                line = f"{idx}. {item}"
+                y_cursor += UITheme.render_terminal_text(
+                    self.screen,
+                    line,
+                    (content_x, y_cursor),
+                    self.font_main,
+                    (255, 120, 120),
+                    content_w
+                ) + 6
+
+            y_cursor += 8
+
+        # --- NEXT STEPS ---
+        next_steps = data.get("next_steps", "")
+        if next_steps:
+            self.screen.blit(self.font_bold.render("NEXT STEPS", True, (120, 200, 255)), (content_x, y_cursor))
+            y_cursor += 28
+            y_cursor += UITheme.render_terminal_text(
+                self.screen,
+                next_steps,
+                (content_x, y_cursor),
+                self.font_main,
+                UITheme.TEXT_OFF_WHITE,
+                content_w
+            ) + 10
+
+        # --- CLAMP SCROLL ---
+        # y_cursor currently includes "-scroll_y", so convert to total content height
+        content_end_y_no_scroll = y_cursor + scroll_y
+        total_content_h = content_end_y_no_scroll - content_start_y
+
+        max_scroll = max(0, int(total_content_h - content_h + 20))  # +20 padding
+        state.ai_popup_scroll_y = max(0, min(state.ai_popup_scroll_y, max_scroll))
+
+        self.screen.set_clip(None)
 
         # Buttons
         layout.btn_popup_close.check_hover(mouse_pos)
@@ -231,6 +311,14 @@ class RenderEngine:
         for b in [layout.btn_menu_file, layout.btn_menu_edit, layout.btn_menu_analyze, layout.btn_undo, layout.btn_redo]:
             b.check_hover(mouse_pos)
             b.draw(self.screen, self.font_small)
+        # EDIT DROPDOWN (Edit File only)
+        if state.show_edit_dropdown and not state.show_ai_popup:
+            dd_rect = pygame.Rect(88, 66, 114, 24)  # background box for dropdown
+            pygame.draw.rect(self.screen, (25, 25, 35), dd_rect)
+            pygame.draw.rect(self.screen, (70, 70, 90), dd_rect, 1)
+
+            layout.dd_edit_file.check_hover(mouse_pos)
+            layout.dd_edit_file.draw(self.screen, self.font_small)
 
         # SEARCH BAR
         search_rect = pygame.Rect(850, 45, 200, 20)

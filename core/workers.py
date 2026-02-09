@@ -331,6 +331,7 @@ class TaskQueue:
                 # --- FIXED: Only update popup data, do NOT overwrite sidebar state ---
                 state.ai_popup_data = data
                 state.show_ai_popup = True
+                state.ai_popup_scroll_y = 0   # Reset Scroll
                 state.status_msg = "ANALYSIS COMPLETE"
             
             elif msg_type == "EXPORT_COMPLETE":
