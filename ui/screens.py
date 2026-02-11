@@ -19,9 +19,12 @@ class RenderEngine:
         # --- NEW: Image Asset Loading ---
         self.icons = {}
         try:
-            logo_raw = pygame.image.load("image/logo.jpg")
-            self.logo_img = pygame.transform.smoothscale(logo_raw, (400, 300))
-            self.logo_img.set_colorkey(self.logo_img.get_at((0,0)))
+            if os.path.exists("image/logo.jpg"):
+                logo_raw = pygame.image.load("image/logo.jpg")
+                self.logo_img = pygame.transform.smoothscale(logo_raw, (400, 300))
+                self.logo_img.set_colorkey(self.logo_img.get_at((0,0)))
+            else:
+                self.logo_img = None
         except: 
             self.logo_img = None
             print("Warning: logo.jpg not found.")
@@ -51,6 +54,9 @@ class RenderEngine:
             for b in [layout.btn_new, layout.btn_load, layout.btn_import]:
                 b.check_hover(mouse_pos)
                 b.draw(self.screen, self.font_main)
+            
+            # Note: Clear Cache button removed from here, moved to Settings
+            
         else:
             box_rect = pygame.Rect(SCREEN_CENTER_X - 225, 380, 450, 240)
             pygame.draw.rect(self.screen, (20, 20, 35), box_rect, border_radius=10)
@@ -76,7 +82,7 @@ class RenderEngine:
         if self.logo_img: 
             self.screen.blit(self.logo_img, self.logo_img.get_rect(center=(SCREEN_CENTER_X, 200)))
             
-        msg1 = self.font_header.render("WELCOME TO THE LAB", True, (255, 255, 255))
+        msg1 = self.font_header.render("WELCOME TO THE LAB", True, UITheme.TEXT_OFF_WHITE)
         msg2 = self.font_bold.render("To begin, please upload your first experimental CSV file.", True, UITheme.TEXT_DIM)
         
         self.screen.blit(msg1, (SCREEN_CENTER_X - msg1.get_width()//2, 320))
@@ -176,20 +182,7 @@ class RenderEngine:
         UITheme.draw_bracket(self.screen, rect, UITheme.ACCENT_ORANGE)
         
         # Header
-        self.screen.blit(self.font_header.render("AI ANALYSIS REPORT", True, (255, 255, 255)), (x + 20, y + 20))
-        
-        # Content
-        # if state.ai_popup_data:
-        #     summary = state.ai_popup_data.get('summary', "No Data.")
-        #     # Wrap and render text inside the box
-        #     UITheme.render_terminal_text(self.screen, summary, (x + 30, y + 80), self.font_main, UITheme.TEXT_OFF_WHITE, w - 60)
-            
-        #     # Anomalies
-        #     anomalies = state.ai_popup_data.get('anomalies', [])
-        #     if anomalies:
-        #         self.screen.blit(self.font_bold.render("DETECTED ANOMALIES:", True, (255, 50, 50)), (x + 30, y + 350))
-        #         anom_txt = ", ".join(anomalies)
-        #         self.screen.blit(self.font_main.render(anom_txt, True, (255, 100, 100)), (x + 30, y + 380))
+        self.screen.blit(self.font_header.render("AI ANALYSIS REPORT", True, UITheme.TEXT_OFF_WHITE), (x + 20, y + 20))
         
         # Content area (scrollable style if you want later)
         content_x = x + 30
@@ -296,6 +289,24 @@ class RenderEngine:
             pygame.draw.rect(self.screen, UITheme.ACCENT_ORANGE, tt_bg, 1)
             self.screen.blit(tt_surf, (tt_bg.x + 5, tt_bg.y + 3))
 
+    def draw_metadata_editor(self, mouse_pos):
+        """Draws the right-side panel when editing notes."""
+        panel_rect = pygame.Rect(840, 420, 420, 200)
+        pygame.draw.rect(self.screen, UITheme.PANEL_GREY, panel_rect)
+        UITheme.draw_bracket(self.screen, panel_rect, UITheme.ACCENT_ORANGE)
+
+        # Header
+        self.screen.blit(self.font_bold.render("EDITING NOTES:", True, UITheme.TEXT_DIM), (860, 430))
+
+        # Text Area (Simple rendering of the current buffer)
+        display_text = state.meta_input_notes + ("|" if (pygame.time.get_ticks() // 500) % 2 == 0 else "")
+        
+        UITheme.render_terminal_text(self.screen, display_text, (860, 460), self.font_main, UITheme.TEXT_OFF_WHITE, 370)
+
+        # Save Button
+        layout.btn_save_meta.check_hover(mouse_pos)
+        layout.btn_save_meta.draw(self.screen, self.font_bold)
+
     def draw_dashboard(self, mouse_pos, tree_ui, ai_engine):
         self.screen.fill(UITheme.BG_DARK)
         UITheme.draw_grid(self.screen)
@@ -308,17 +319,35 @@ class RenderEngine:
         self.screen.blit(self.font_bold.render(header_txt, True, UITheme.ACCENT_ORANGE), (20, 10))
         
         # MENU BAR
-        for b in [layout.btn_menu_file, layout.btn_menu_edit, layout.btn_menu_analyze, layout.btn_undo, layout.btn_redo]:
+        for b in [layout.btn_menu_file, layout.btn_menu_edit, layout.btn_menu_ai]:
             b.check_hover(mouse_pos)
             b.draw(self.screen, self.font_small)
-        # EDIT DROPDOWN (Edit File only)
-        if state.show_edit_dropdown and not state.show_ai_popup:
-            dd_rect = pygame.Rect(88, 66, 114, 24)  # background box for dropdown
-            pygame.draw.rect(self.screen, (25, 25, 35), dd_rect)
-            pygame.draw.rect(self.screen, (70, 70, 90), dd_rect, 1)
 
-            layout.dd_edit_file.check_hover(mouse_pos)
-            layout.dd_edit_file.draw(self.screen, self.font_small)
+        # --- DROPDOWNS ---
+        
+        # Helper to draw a dropdown box
+        def draw_dropdown_bg(rect):
+            pygame.draw.rect(self.screen, (25, 25, 35), rect)
+            pygame.draw.rect(self.screen, (70, 70, 90), rect, 1)
+
+        # FILE DROPDOWN
+        if state.show_file_dropdown:
+            draw_dropdown_bg(pygame.Rect(20, 66, 140, 26))
+            layout.dd_file_export.check_hover(mouse_pos)
+            layout.dd_file_export.draw(self.screen, self.font_small)
+
+        # EDIT DROPDOWN
+        if state.show_edit_dropdown:
+            draw_dropdown_bg(pygame.Rect(90, 66, 110, 78)) # Height covers 3 buttons
+            for b in [layout.dd_edit_undo, layout.dd_edit_redo, layout.dd_edit_file]:
+                b.check_hover(mouse_pos)
+                b.draw(self.screen, self.font_small)
+
+        # AI DROPDOWN
+        if state.show_ai_dropdown:
+            draw_dropdown_bg(pygame.Rect(160, 66, 140, 26))
+            layout.dd_ai_analyze.check_hover(mouse_pos)
+            layout.dd_ai_analyze.draw(self.screen, self.font_small)
 
         # SEARCH BAR
         search_rect = pygame.Rect(850, 45, 200, 20)
@@ -392,9 +421,6 @@ class RenderEngine:
                 if plot_rect.collidepoint(mouse_pos) and state.plot_context and not state.show_ai_popup:
                     self.draw_plot_tooltip(mouse_pos)
 
-                if state.show_axis_selector and state.plot_context:
-                    self.draw_axis_selector(mouse_pos)
-
             # ANALYSIS TEXT
             if state.current_analysis:
                 analysis_area = pygame.Rect(850, 420, 390, 200)
@@ -407,10 +433,11 @@ class RenderEngine:
                     UITheme.render_terminal_text(self.screen, meta_txt, (855, y_pos + h), self.font_main, UITheme.ACCENT_ORANGE, 380)
                 self.screen.set_clip(None)
         else:
+            # FIXED: Implemented this method above
             self.draw_metadata_editor(mouse_pos)
 
         # COMMON BUTTONS
-        for b in [layout.btn_export, layout.btn_branch, layout.btn_snapshot_export]:
+        for b in [layout.btn_export, layout.btn_branch]:
             b.check_hover(mouse_pos)
             b.draw(self.screen, self.font_main)
         

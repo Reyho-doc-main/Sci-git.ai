@@ -1,43 +1,50 @@
+# --- START OF FILE settings.py ---
 import pygame
+from ui.styles import theme
 
-class UITheme:
-    # Color Palette - Industrial / Terminal Aesthetic
-    BG_DARK = (10, 10, 12)
-    BG_LOGIN = (0, 67, 153) 
-    PANEL_GREY = (22, 22, 26, 220)
-    ACCENT_ORANGE = (255, 120, 0)
-    TEXT_OFF_WHITE = (210, 210, 215)
-    TEXT_DIM = (120, 120, 130)
-    GRID_COLOR = (28, 28, 32)
-    NODE_MAIN = (0, 180, 255)
-    NODE_BRANCH = (0, 255, 150)
-    LOGO_CYAN = (0, 212, 255)
+# This MetaClass allows us to access properties like UITheme.BG_DARK
+# and have them dynamically return the value from the current 'theme' object.
+class DynamicThemeMeta(type):
+    @property
+    def BG_DARK(cls): return theme.BG_MAIN # Mapped to Main BG
+    
+    # FIXED: Hardcoded to Blue so the logo always looks good on Splash Screen
+    @property
+    def BG_LOGIN(cls): return (0, 67, 153) 
+    
+    @property
+    def PANEL_GREY(cls): return theme.BG_PANEL
+    @property
+    def ACCENT_ORANGE(cls): return theme.ACCENT
+    @property
+    def TEXT_OFF_WHITE(cls): return theme.TEXT_MAIN
+    @property
+    def TEXT_DIM(cls): return theme.TEXT_DIM
+    @property
+    def GRID_COLOR(cls): return theme.GRID
+    @property
+    def NODE_MAIN(cls): return theme.NODE_MAIN
+    @property
+    def NODE_BRANCH(cls): return theme.NODE_BRANCH
+    @property
+    def LOGO_CYAN(cls): return theme.ACCENT_SEC
 
+class UITheme(metaclass=DynamicThemeMeta):
+    # Static methods remain, but they use the passed color or theme defaults
     @staticmethod
     def draw_bracket(surface, rect, color, length=12, thickness=2):
-        """Draws sharp industrial corner brackets around a rect."""
-        x, y, w, h = rect
-        # Top Left
-        pygame.draw.lines(surface, color, False, [(x, y + length), (x, y), (x + length, y)], thickness)
-        # Top Right
-        pygame.draw.lines(surface, color, False, [(x + w - length, y), (x + w, y), (x + w, y + length)], thickness)
-        # Bottom Left
-        pygame.draw.lines(surface, color, False, [(x, y + h - length), (x, y + h), (x + length, y + h)], thickness)
-        # Bottom Right
-        pygame.draw.lines(surface, color, False, [(x + w - length, y + h), (x + w, y + h), (x + w, y + h - length)], thickness)
+        theme.draw_bracket(surface, rect, color, length, thickness)
 
     @staticmethod
     def draw_grid(surface):
-        """Draws the background industrial grid."""
         width, height = surface.get_size()
         for x in range(0, width, 40):
-            pygame.draw.line(surface, UITheme.GRID_COLOR, (x, 0), (x, height))
+            pygame.draw.line(surface, theme.GRID, (x, 0), (x, height))
         for y in range(0, height, 40):
-            pygame.draw.line(surface, UITheme.GRID_COLOR, (0, y), (width, height))
+            pygame.draw.line(surface, theme.GRID, (0, y), (width, height))
 
     @staticmethod
     def render_terminal_text(surface, text, pos, font, color, width_limit=400):
-        """Helper to wrap text for the side panels."""
         words = text.split()
         lines = []
         current_line = []
@@ -60,35 +67,25 @@ class UITheme:
     
     @staticmethod
     def draw_orange_streaks(surface, frame_count):
-        """Draws moving high-tech scanning lines."""
-        width, height = surface.get_size()
-        # A slow moving horizontal scan line
-        y_pos = (frame_count * 2) % height
-        pygame.draw.line(surface, (100, 50, 0), (0, y_pos), (width, y_pos), 1)
-        # Static decorative streaks
-        pygame.draw.line(surface, UITheme.ACCENT_ORANGE, (20, 0), (20, height), 1)
-        pygame.draw.line(surface, UITheme.ACCENT_ORANGE, (width-20, 0), (width-20, height), 1)
-
-    @staticmethod
-    def draw_glass_panel(surface, rect, color=(30, 30, 35, 180)):
-        """Draws a semi-transparent 'Glass' panel with the signature brackets."""
-        shape_surf = pygame.Surface(pygame.Rect(rect).size, pygame.SRCALPHA)
-        pygame.draw.rect(shape_surf, color, shape_surf.get_rect(), border_radius=4)
-        surface.blit(shape_surf, rect[:2])
-        UITheme.draw_bracket(surface, rect, UITheme.ACCENT_ORANGE)
+        # Only draw streaks in Dark Mode for aesthetic
+        if theme.BG_MAIN[0] < 50: 
+            width, height = surface.get_size()
+            y_pos = (frame_count * 2) % height
+            pygame.draw.line(surface, (100, 50, 0), (0, y_pos), (width, y_pos), 1)
+            pygame.draw.line(surface, theme.ACCENT, (20, 0), (20, height), 1)
+            pygame.draw.line(surface, theme.ACCENT, (width-20, 0), (width-20, height), 1)
 
     @staticmethod
     def draw_scanning_lines(surface, frame_count):
-        """Draws moving high-tech scanning lines for the login screen."""
         width, height = surface.get_size()
-        # A slow moving horizontal scan line
         y_pos = (frame_count * 2) % height
         
-        # Create a faint glow effect
+        # Glow effect
         scan_surf = pygame.Surface((width, 2), pygame.SRCALPHA)
-        scan_surf.fill((255, 120, 0, 100)) # Transparent orange
+        # Use Accent color for scan
+        c = theme.ACCENT
+        scan_surf.fill((c[0], c[1], c[2], 100)) 
         surface.blit(scan_surf, (0, y_pos))
         
-        # Static side streaks (The orange lines you liked)
-        pygame.draw.line(surface, (255, 120, 0), (20, 0), (20, height), 1)
-        pygame.draw.line(surface, (255, 120, 0), (width-20, 0), (width-20, height), 1)
+        pygame.draw.line(surface, theme.ACCENT, (20, 0), (20, height), 1)
+        pygame.draw.line(surface, theme.ACCENT, (width-20, 0), (width-20, height), 1)

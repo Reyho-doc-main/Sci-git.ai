@@ -31,7 +31,13 @@ class AppState:
         # Extended UI Toggles
         self.show_ai_panel = False          
         self.is_editing_metadata = False
+        
+        # --- DROPDOWN STATES ---
+        self.show_file_dropdown = False
         self.show_edit_dropdown = False
+        self.show_ai_dropdown = False
+        
+        self.show_settings = False 
         
         # GLOBAL EDITOR STATE
         self.editor_df = None

@@ -3,6 +3,7 @@ import pygame
 import os
 import sys
 import shutil
+import pathlib
 import pandas as pd
 import tkinter as tk
 from tkinter import filedialog, simpledialog
@@ -12,13 +13,14 @@ from queue import Queue
 from state_manager import state
 from database.db_handler import DBHandler
 from ui.elements import VersionTree
-from ui.layout import layout  # Import the buttons
-from ui.screens import RenderEngine # Import the drawing logic
+from ui.layout import layout
+from ui.screens import RenderEngine
 from core.watcher import start_watcher
 from engine.ai import ScienceAI
 from core.processor import export_to_report
 from core.workers import TaskQueue, WorkerController
 from core.hashing import save_to_vault, get_file_hash
+from ui.axis_and_settings import AxisSelector, SettingsMenu 
 
 # --- INIT ---
 pygame.init()
@@ -44,7 +46,11 @@ tree_ui = VersionTree()
 event_queue = Queue()
 task_manager = TaskQueue()
 render_engine = RenderEngine(screen)
-worker_ctrl = None # Will be init after DB load
+worker_ctrl = None 
+
+# --- NEW: Menu Objects ---
+axis_selector = AxisSelector()
+settings_menu = SettingsMenu()
 
 # --- STATE CONSTANTS ---
 STATE_SPLASH = "SPLASH"
@@ -62,12 +68,28 @@ def load_database_safe(path):
         try: db.close()
         except: pass
     db = DBHandler(path)
-    worker_ctrl = WorkerController(db, ai_engine) # Connect worker to DB
+    
+    # Prune Missing Files on Load
+    if db.prune_missing_files():
+        print("Database pruned of missing files.")
+        
+    worker_ctrl = WorkerController(db, ai_engine) 
+
+def clear_pycache():
+    """Recursively deletes __pycache__ folders."""
+    root_path = pathlib.Path(".")
+    count = 0
+    for p in root_path.rglob("__pycache__"):
+        try:
+            shutil.rmtree(p)
+            count += 1
+        except Exception as e:
+            print(f"Failed to delete {p}: {e}")
+    print(f"Cleared {count} __pycache__ folders.")
 
 def save_editor_changes():
     if not state.selected_ids: return
     
-    # Commit pending buffer before saving
     if state.editor_selected_cell:
         r, c = state.editor_selected_cell
         try:
@@ -150,7 +172,6 @@ while running:
             state.processing_mode = "LOCAL"
             task_manager.add_task(worker_ctrl.worker_process_new_file, [ev["path"], state.head_id, state.active_branch, state.researcher_name])
 
-    axis_selector_rect = pygame.Rect(850, 130, 200, 300)
     search_bar_hitbox = pygame.Rect(850, 45, 200, 20)
 
     for event in events:
@@ -169,13 +190,11 @@ while running:
         # --- EDITOR KEYBOARD INPUT ---
         if current_state == STATE_EDITOR and event.type == pygame.KEYDOWN:
             if event.key in [pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT]:
-                # 1. Commit current buffer if valid
                 if state.editor_selected_cell:
                     r, c = state.editor_selected_cell
                     try: state.editor_df.iloc[r, c] = float(state.editor_input_buffer)
                     except: state.editor_df.iloc[r, c] = state.editor_input_buffer
                 
-                # 2. Determine new pos
                 if not state.editor_selected_cell:
                     new_r, new_c = 0, 0
                 else:
@@ -186,11 +205,9 @@ while running:
                     elif event.key == pygame.K_LEFT: new_c = max(0, c - 1)
                     elif event.key == pygame.K_RIGHT: new_c = min(len(state.editor_df.columns)-1, c + 1)
                 
-                # 3. Apply & Scroll
                 state.editor_selected_cell = (new_r, new_c)
                 state.editor_input_buffer = str(state.editor_df.iloc[new_r, new_c])
                 
-                # Auto-Scroll Logic (15 is visible row count)
                 if new_r < state.editor_scroll_y: state.editor_scroll_y = new_r
                 if new_r >= state.editor_scroll_y + 15: state.editor_scroll_y = new_r - 14
 
@@ -228,7 +245,6 @@ while running:
                 elif layout.btn_editor_exit.check_hover(mouse_pos):
                     current_state = STATE_DASHBOARD
                 
-                # GRID CLICK LOGIC
                 if 50 < mouse_pos[0] < 1230 and 100 < mouse_pos[1] < 600:
                     rel_y = mouse_pos[1] - 100
                     row_idx = (rel_y // 30) + int(state.editor_scroll_y)
@@ -241,13 +257,20 @@ while running:
                         state.editor_selected_cell = None
 
             elif current_state == STATE_DASHBOARD:
+                # --- SETTINGS OVERLAY ---
+                if state.show_settings:
+                    action = settings_menu.handle_click(mouse_pos)
+                    if action == "CLEAR_CACHE":
+                        clear_pycache()
+                        state.status_msg = "CACHE CLEARED."
+                    continue # Block other clicks
+
                 if search_bar_hitbox.collidepoint(mouse_pos):
                     state.search_active = True
                 else:
                     state.search_active = False
 
                 if state.show_ai_popup:
-                    # --- AI POPUP INTERACTIONS ---
                     if layout.btn_popup_close.check_hover(mouse_pos):
                         state.show_ai_popup = False
                     elif layout.btn_popup_download.check_hover(mouse_pos):
@@ -266,27 +289,8 @@ while running:
                                     state.status_msg = f"ERROR: {e}"
                 
                 elif state.show_axis_selector:
-                    # --- FIXED: Allow closing the selector via the gear button ---
-                    if layout.btn_axis_gear.check_hover(mouse_pos):
-                        state.show_axis_selector = False
-                    
-                    # Close if clicking outside
-                    elif not axis_selector_rect.collidepoint(mouse_pos):
-                        state.show_axis_selector = False
-                    
-                    # Handle Column Clicks
-                    elif axis_selector_rect.collidepoint(mouse_pos) and state.plot_context:
-                        df_ref = state.plot_context['df']
-                        numeric_cols = df_ref.select_dtypes(include=['number']).columns
-                        local_y = mouse_pos[1] - 160
-                        idx = local_y // 25
-                        if 0 <= idx < len(numeric_cols):
-                            col_name = numeric_cols[idx]
-                            state.processing_mode = "LOCAL"
-                            if 850 <= mouse_pos[0] < 950: 
-                                task_manager.add_task(worker_ctrl.worker_load_experiment, [state.selected_ids, col_name, state.plot_context.get('y_col'), True])
-                            else:
-                                task_manager.add_task(worker_ctrl.worker_load_experiment, [state.selected_ids, state.plot_context.get('x_col'), col_name, True])
+                    # Use the new AxisSelector class logic
+                    axis_selector.handle_click(mouse_pos, state.plot_context, worker_ctrl, task_manager)
 
                 elif state.show_conversion_dialog:
                     if layout.btn_conv_yes.check_hover(mouse_pos):
@@ -298,55 +302,76 @@ while running:
                         state.show_conversion_dialog = False
 
                 else:
-                    # BUTTON CLICKS (Referring to layout object)
-                    # --- EDIT DROPDOWN HANDLING ---
-                    # 1) Click EDIT -> toggle dropdown (and STOP it from opening editor directly)
+                    # --- SETTINGS BUTTON ---
+                    if layout.btn_main_settings.check_hover(mouse_pos):
+                        state.show_settings = True
+                        continue
+
+                    # --- NEW DROPDOWN HANDLING ---
+                    
+                    # 1. FILE DROPDOWN
+                    if layout.btn_menu_file.check_hover(mouse_pos):
+                        state.show_file_dropdown = not state.show_file_dropdown
+                        state.show_edit_dropdown = False
+                        state.show_ai_dropdown = False
+                        continue
+                    
+                    if state.show_file_dropdown:
+                        if layout.dd_file_export.check_hover(mouse_pos):
+                            state.show_file_dropdown = False
+                            state.processing_mode = "LOCAL"
+                            task_manager.add_task(worker_ctrl.worker_export_project, [state.selected_project_path])
+                            continue
+                        # Close if clicked outside
+                        if not pygame.Rect(20, 66, 140, 26).collidepoint(mouse_pos):
+                            state.show_file_dropdown = False
+
+                    # 2. EDIT DROPDOWN
                     if layout.btn_menu_edit.check_hover(mouse_pos):
                         state.show_edit_dropdown = not state.show_edit_dropdown
-                        continue  # important: prevents the old direct-open logic below from running
+                        state.show_file_dropdown = False
+                        state.show_ai_dropdown = False
+                        continue 
 
-                    # 2) If dropdown open, handle click on EDIT FILE
                     if state.show_edit_dropdown:
+                        if layout.dd_edit_undo.check_hover(mouse_pos):
+                            state.show_edit_dropdown = False
+                            perform_undo()
+                            continue
+                        if layout.dd_edit_redo.check_hover(mouse_pos):
+                            state.show_edit_dropdown = False
+                            perform_redo()
+                            continue
                         if layout.dd_edit_file.check_hover(mouse_pos):
                             state.show_edit_dropdown = False
                             open_editor_for_selected()
                             continue
-
-                        # 3) Click outside -> close dropdown
-                        dd_area = pygame.Rect(88, 66, 114, 24)
-                        if not dd_area.collidepoint(mouse_pos):
+                        
+                        # Close if clicked outside
+                        if not pygame.Rect(90, 66, 110, 78).collidepoint(mouse_pos):
                             state.show_edit_dropdown = False
 
-                    if layout.btn_menu_analyze.check_hover(mouse_pos):
-                        state.processing_mode = "AI"
-                        if len(state.selected_ids) == 1:
-                            state.status_msg = "ANALYZING FILE (MINI)..."
-                            task_manager.add_task(worker_ctrl.worker_analyze_selection, [state.selected_ids[0]])
-                        else:
-                            state.status_msg = "ANALYZING BRANCH (NANO)..."
-                            task_manager.add_task(worker_ctrl.worker_analyze_branch, [state.active_branch])
-                    
-                    # if layout.btn_menu_edit.check_hover(mouse_pos):
-                    #     if len(state.selected_ids) == 1:
-                    #         raw = db.get_experiment_by_id(state.selected_ids[0])
-                    #         state.editor_file_path = raw[3]
-                    #         try:
-                    #             state.editor_df = pd.read_csv(state.editor_file_path)
-                    #             current_state = STATE_EDITOR
-                    #             state.editor_selected_cell = None
-                    #             state.status_msg = "EDITING MODE ACTIVE"
-                    #         except Exception as e:
-                    #             state.status_msg = "ERROR OPENING FILE"
-
-                    if layout.btn_menu_file.check_hover(mouse_pos):
-                        state.processing_mode = "LOCAL"
-                        task_manager.add_task(worker_ctrl.worker_export_project, [state.selected_project_path])
-                    
-                    if layout.btn_undo.check_hover(mouse_pos):
-                        perform_undo()
-                    
-                    if layout.btn_redo.check_hover(mouse_pos):
-                        perform_redo()
+                    # 3. AI DROPDOWN
+                    if layout.btn_menu_ai.check_hover(mouse_pos):
+                        state.show_ai_dropdown = not state.show_ai_dropdown
+                        state.show_file_dropdown = False
+                        state.show_edit_dropdown = False
+                        continue
+                        
+                    if state.show_ai_dropdown:
+                        if layout.dd_ai_analyze.check_hover(mouse_pos):
+                            state.show_ai_dropdown = False
+                            state.processing_mode = "AI"
+                            if len(state.selected_ids) == 1:
+                                state.status_msg = "ANALYZING FILE (MINI)..."
+                                task_manager.add_task(worker_ctrl.worker_analyze_selection, [state.selected_ids[0]])
+                            else:
+                                state.status_msg = "ANALYZING BRANCH (NANO)..."
+                                task_manager.add_task(worker_ctrl.worker_analyze_branch, [state.active_branch])
+                            continue
+                        
+                        if not pygame.Rect(160, 66, 140, 26).collidepoint(mouse_pos):
+                            state.show_ai_dropdown = False
 
                     # Toggle Axis Selector
                     if layout.btn_axis_gear.check_hover(mouse_pos): 
@@ -367,9 +392,6 @@ while running:
                         state.processing_mode = "LOCAL"
                         task_manager.add_task(worker_ctrl.worker_load_experiment, [state.selected_ids])
                     
-                    elif layout.btn_snapshot_export.check_hover(mouse_pos):
-                        state.processing_mode = "LOCAL"
-                        task_manager.add_task(worker_ctrl.worker_export_project, [state.selected_project_path])
                     elif layout.btn_branch.check_hover(mouse_pos):
                         new_branch = simpledialog.askstring("New Branch", "Name:")
                         if new_branch:
@@ -389,13 +411,10 @@ while running:
                     
                     # TREE INTERACTION
                     if not state.is_editing_metadata and not state.show_axis_selector:
-                        if state.is_editing_metadata:
-                             pass 
-                        else:
-                            selected_list = tree_ui.handle_click(event.pos, (20, 80, 800, 600))
-                            if selected_list: 
-                                state.processing_mode = "LOCAL"
-                                task_manager.add_task(worker_ctrl.worker_load_experiment, [selected_list])
+                        selected_list = tree_ui.handle_click(event.pos, (20, 80, 800, 600))
+                        if selected_list: 
+                            state.processing_mode = "LOCAL"
+                            task_manager.add_task(worker_ctrl.worker_load_experiment, [selected_list])
             
             # SPLASH / ONBOARDING
             elif current_state == STATE_SPLASH:
@@ -420,6 +439,9 @@ while running:
                             state.selected_project_path = os.path.dirname(file_path)
                             load_database_safe(file_path)
                             state.show_login_box = True
+                    
+                    # Note: Clear Cache button removed from here, moved to Settings
+
                 else:
                     if layout.btn_confirm.check_hover(mouse_pos):
                         if len(state.researcher_name) >= 2:
@@ -446,7 +468,7 @@ while running:
                 else: state.researcher_name += event.unicode
             elif state.search_active:
                 if event.key == pygame.K_BACKSPACE: state.search_text = state.search_text[:-1]
-                elif event.key == pygame.K_RETURN: state.search_active = False # Commit search
+                elif event.key == pygame.K_RETURN: state.search_active = False 
                 else: state.search_text += event.unicode
                 tree_ui.search_filter = state.search_text
             elif state.is_editing_metadata:
@@ -458,12 +480,11 @@ while running:
         
         # --- VIEWPORT NAVIGATION ---
         if current_state == STATE_DASHBOARD:
-                # --- AI POPUP SCROLL ---
             if event.type == pygame.MOUSEWHEEL and state.show_ai_popup:
                 state.ai_popup_scroll_y = max(0, state.ai_popup_scroll_y - event.y * 30)
-                continue  # prevent zoom / panel scroll underneath
+                continue 
             if event.type == pygame.MOUSEWHEEL: 
-                if mouse_pos[0] > 840: # Over right panel
+                if mouse_pos[0] > 840: 
                     state.analysis_scroll_y = max(0, state.analysis_scroll_y - event.y * 20)
                 else:
                     tree_ui.handle_zoom("in" if event.y > 0 else "out")
@@ -482,7 +503,22 @@ while running:
         if state.needs_tree_update:
             tree_ui.update_tree(db.get_tree_data())
             state.needs_tree_update = False
+        
         render_engine.draw_dashboard(mouse_pos, tree_ui, ai_engine)
+
+        # Draw New Overlays
+        if state.show_axis_selector:
+            axis_selector.draw(screen, 850, 130, state.plot_context)
+        
+        if state.show_settings:
+            settings_menu.draw(screen)
+            
+        # Draw Settings Button Icon (if image exists, else fallback to text)
+        if render_engine.icons.get('settings'):
+            r = layout.btn_main_settings.rect
+            screen.blit(render_engine.icons['settings'], (r.x, r.y))
+        else:
+            layout.btn_main_settings.draw(screen, render_engine.font_bold)
 
     pygame.display.flip()
     clock.tick(60)

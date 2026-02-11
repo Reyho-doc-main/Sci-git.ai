@@ -1,6 +1,7 @@
 import sqlite3
 import json
 import threading
+import os
 from datetime import datetime
 
 class DBHandler:
@@ -157,3 +158,19 @@ class DBHandler:
             """
             cursor.execute(query, (node_id,))
             self.conn.commit()
+    def prune_missing_files(self):
+        """Remove experiments whose file_path no longer exists on disk."""
+        with self.lock:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT id, file_path FROM experiments")
+            rows = cursor.fetchall()
+
+            removed = False
+            for exp_id, file_path in rows:
+                if file_path and not os.path.exists(file_path):
+                    cursor.execute("DELETE FROM experiments WHERE id = ?", (exp_id,))
+                    removed = True
+
+            if removed:
+                self.conn.commit()
+            return removed
