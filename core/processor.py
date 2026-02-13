@@ -1,3 +1,4 @@
+# --- FILE: core/processor.py ---
 from fpdf import FPDF
 import os
 import pandas as pd
@@ -72,13 +73,28 @@ def export_to_report(filename, analysis_dict, branch_name, plot_image_path=None)
         print(f"PDF Generation Error: {e}")
         return False
 
+def export_tree_to_pdf(filename, tree_image_path):
+    """Exports the version tree diagram to a PDF."""
+    pdf = PDFReport()
+    pdf.add_page()
+    pdf.set_font("DejaVu", "B", 16)
+    pdf.cell(0, 10, "PROJECT STRUCTURE MAPPING", ln=True, align='L')
+    pdf.ln(5)
+    
+    if tree_image_path and os.path.exists(tree_image_path):
+        # Scale image to fit page width
+        pdf.image(tree_image_path, x=10, w=190)
+    
+    try:
+        pdf.output(filename)
+        return True
+    except Exception as e:
+        print(f"Tree PDF Error: {e}")
+        return False
+
 class DiffEngine:
     @staticmethod
     def compute_diff(file_path_a, file_path_b):
-        """
-        Compares two CSV files and returns a list of styled lines for Pygame.
-        Returns: List of (text, color) tuples.
-        """
         try:
             df_a = pd.read_csv(file_path_a)
             df_b = pd.read_csv(file_path_b)
@@ -86,8 +102,6 @@ class DiffEngine:
             return [("Error reading files for diff.", (255, 0, 0))]
 
         lines = []
-        
-        # 1. Header Comparison
         cols_a = set(df_a.columns)
         cols_b = set(df_b.columns)
         
@@ -99,21 +113,15 @@ class DiffEngine:
         if removed_cols:
             lines.append((f"-- REMOVED COLUMNS: {', '.join(removed_cols)}", (255, 50, 50)))
         
-        # 2. Row Comparison (Key-based if 'id' exists, else Index-based)
         max_rows = max(len(df_a), len(df_b))
-        
-        # Limit diff to 50 rows to prevent UI lag
         limit = min(max_rows, 50) 
         
         lines.append(("--- ROW COMPARISON (First 50) ---", UITheme.TEXT_DIM))
         
         for i in range(limit):
-            # Case 1: Row exists in both
             if i < len(df_a) and i < len(df_b):
                 row_a = df_a.iloc[i]
                 row_b = df_b.iloc[i]
-                
-                # Check for differences
                 diffs = []
                 for col in df_a.columns:
                     if col in df_b.columns:
@@ -121,17 +129,11 @@ class DiffEngine:
                         val_b = str(row_b[col])
                         if val_a != val_b:
                             diffs.append(f"{col}: {val_a}->{val_b}")
-                
                 if diffs:
                     lines.append((f"MOD ROW {i}: " + ", ".join(diffs), (255, 200, 0)))
-                # Else: Row is identical, don't show (cleaner)
-
-            # Case 2: Row added in B
             elif i >= len(df_a):
                 row_str = ", ".join([str(x) for x in df_b.iloc[i].values])
                 lines.append((f"++ NEW ROW {i}: {row_str[:50]}...", (0, 255, 0)))
-
-            # Case 3: Row removed in B (exists in A)
             elif i >= len(df_b):
                 row_str = ", ".join([str(x) for x in df_a.iloc[i].values])
                 lines.append((f"-- DEL ROW {i}: {row_str[:50]}...", (255, 50, 50)))

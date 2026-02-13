@@ -1,4 +1,4 @@
-# --- FILE: workers.py ---
+# --- FILE: core/workers.py ---
 import pygame
 import os
 import json
@@ -21,16 +21,9 @@ class WorkerController:
                 raw = self.db.get_experiment_by_id(exp_ids[0])
                 if raw:
                     file_path = raw[3]
-
                     if not os.path.exists(file_path):
-                        return {
-                            "type": "LOAD_COMPLETE",
-                            "data": {
-                                "analysis": {"summary": "CRITICAL ERROR: The source CSV file for this node has been moved or deleted.", "anomalies": ["FILE_NOT_FOUND"]},
-                                "status": "FILE MISSING",
-                                "is_corrupted": True
-                            }
-                        }
+                        return {"type": "LOAD_COMPLETE", "data": {"analysis": {"summary": "FILE MISSING", "anomalies": ["FILE_NOT_FOUND"]}, "status": "FILE MISSING", "is_corrupted": True}}
+                    
                     saved_settings = None
                     if len(raw) > 11 and raw[11]: saved_settings = json.loads(raw[11])
                     final_x = custom_x if custom_x else (saved_settings.get("x") if saved_settings else None)
@@ -40,9 +33,9 @@ class WorkerController:
                         self.db.update_plot_settings(exp_ids[0], final_x, final_y)
 
                     file_size = os.path.getsize(file_path)
-                    if file_size > 50 * 1024 * 1024: # 50MB
+                    if file_size > 50 * 1024 * 1024:
                         df = pd.read_csv(file_path, nrows=1000)
-                        status_note = "LARGE FILE: PREVIEW MODE (FIRST 1000 ROWS)"
+                        status_note = "LARGE FILE: PREVIEW MODE"
                     else:
                         df = pd.read_csv(file_path)
                         status_note = f"LOADED: {raw[2]}"
@@ -64,24 +57,13 @@ class WorkerController:
                 if raw1 and raw2:
                     df1 = pd.read_csv(raw1[3])
                     df2 = pd.read_csv(raw2[3])
-                    
                     u1, col1 = HeaderScanner.detect_temp_unit(df1)
                     u2, col2 = HeaderScanner.detect_temp_unit(df2)
-                    
-                    if u1 and u2 and u1 != u2:
-                        return {"type": "CONVERSION_NEEDED", "data": (raw2[3], col2, u1)}
+                    if u1 and u2 and u1 != u2: return {"type": "CONVERSION_NEEDED", "data": (raw2[3], col2, u1)}
                     
                     plot_bytes, size, context = create_seaborn_surface(df1, df2, x_col=custom_x, y_col=custom_y)
                     comparison = self.ai_engine.compare_experiments(df1, df2)
-                    
-                    return {
-                        "type": "LOAD_COMPLETE",
-                        "data": {
-                            "plot_data": (plot_bytes, size, context),
-                            "analysis": comparison,
-                            "status": "COMPARISON COMPLETE"
-                        }
-                    }
+                    return {"type": "LOAD_COMPLETE", "data": {"plot_data": (plot_bytes, size, context), "analysis": comparison, "status": "COMPARISON COMPLETE"}}
             return {"type": "ERROR", "data": "Invalid Selection"}
         except Exception as e:
             return {"type": "ERROR", "data": str(e)}
@@ -92,12 +74,18 @@ class WorkerController:
             if existing_id:
                 return self.worker_load_experiment([existing_id])
             
-            # --- PERFORMANCE FIX: Use Placeholder Analysis ---
-            # Don't run full AI here. Just get basic stats.
-            analysis_data = self.ai_engine.get_placeholder_analysis(file_path)
+            project_path = os.path.dirname(os.path.dirname(file_path)) # Assuming data/file.csv
+            if ".sci_vault" not in project_path: # Fallback if path is weird
+                project_path = state.selected_project_path
             
+            initial_hash = save_to_vault(file_path, project_path)
+            
+            analysis_data = self.ai_engine.get_placeholder_analysis(file_path)
             new_id = self.db.add_experiment(os.path.basename(file_path), file_path, analysis_data.model_dump(), parent_id, branch)
             
+            if initial_hash and new_id:
+                self.db.add_hash_to_history(new_id, initial_hash)
+
             df = pd.read_csv(file_path)
             plot_bytes, size, context = create_seaborn_surface(df)
             
@@ -113,34 +101,36 @@ class WorkerController:
         except Exception as e:
             return {"type": "ERROR", "data": str(e)}
 
+    def worker_find_inconsistencies(self):
+        try:
+            tree_data = self.db.get_tree_data()
+            # Convert to text for AI
+            tree_text = "\n".join([f"ID:{r[0]}, Parent:{r[1]}, Branch:{r[2]}, Name:{r[3]}" for r in tree_data])
+            
+            report = self.ai_engine.find_inconsistencies(tree_text)
+            
+            return {
+                "type": "INCONSISTENCY_CHECK_COMPLETE",
+                "data": report.model_dump()
+            }
+        except Exception as e:
+            return {"type": "ERROR", "data": str(e)}
+
+    # ... [Rest of file: worker_analyze_selection, worker_analyze_branch, etc. remain unchanged] ...
     def worker_analyze_selection(self, node_id):
-        """Manually triggered AI analysis for a specific node using GPT-5-Mini."""
         try:
             raw = self.db.get_experiment_by_id(node_id)
             if not raw: return {"type": "ERROR", "data": "Node not found"}
-            
             file_path = raw[3]
             if not os.path.exists(file_path): return {"type": "ERROR", "data": "File missing"}
-            
-            # Check before AI call
             if state.stop_ai_requested: return {"type": "CANCELLED"}
-            
-            # Run the heavy AI analysis
             analysis_data = self.ai_engine.analyze_csv_data(file_path, model="gpt-5-mini")
-            
-            # Check after AI call (in case user clicked stop while waiting)
             if state.stop_ai_requested: return {"type": "CANCELLED"}
-            
-            # Update DB with new analysis
             with self.db.lock:
                 cursor = self.db.conn.cursor()
                 cursor.execute("UPDATE experiments SET analysis_json = ? WHERE id = ?", (json.dumps(analysis_data.model_dump()), node_id))
                 self.db.conn.commit()
-            
-            return {
-                "type": "ANALYSIS_READY",
-                "data": analysis_data.model_dump()
-            }
+            return {"type": "ANALYSIS_READY", "data": analysis_data.model_dump()}
         except Exception as e:
             return {"type": "ERROR", "data": str(e)}
 
@@ -149,15 +139,10 @@ class WorkerController:
             tree = self.db.get_tree_data()
             branch_nodes = [row for row in tree if row[2] == branch_name]
             history_text = "\n".join([f"ID: {row[0]} | Name: {row[3]}" for row in branch_nodes[-5:]])
-            
             if state.stop_ai_requested: return {"type": "CANCELLED"}
             report = self.ai_engine.analyze_branch_history(history_text)
             if state.stop_ai_requested: return {"type": "CANCELLED"}
-            
-            return {
-                "type": "ANALYSIS_READY",
-                "data": {"summary": f"BRANCH REPORT ({branch_name}):\n{report}", "anomalies": []}
-            }
+            return {"type": "ANALYSIS_READY", "data": {"summary": f"BRANCH REPORT ({branch_name}):\n{report}", "anomalies": []}}
         except Exception as e:
             return {"type": "ERROR", "data": str(e)}
 
@@ -181,82 +166,37 @@ class WorkerController:
             return {"type": "ERROR", "data": str(e)}
 
     def worker_save_editor_changes(self, node_id, file_path, df, project_path):
-        """Saves editor changes with version control (hashing old version)."""
         try:
-            # 1. Archive the current version on disk before overwriting
             old_hash = save_to_vault(file_path, project_path)
-            if old_hash:
-                self.db.add_hash_to_history(node_id, old_hash)
-            
-            # 2. Save the new data
+            if old_hash: self.db.add_hash_to_history(node_id, old_hash)
             df.to_csv(file_path, index=False)
-            
-            # 3. Reload visualization
             plot_bytes, size, context = create_seaborn_surface(df)
-            
-            return {
-                "type": "SAVE_COMPLETE", 
-                "data": {
-                    "node_id": node_id, 
-                    "status": "VERSION SAVED",
-                    "plot_data": (plot_bytes, size, context)
-                }
-            }
+            return {"type": "SAVE_COMPLETE", "data": {"node_id": node_id, "status": "VERSION SAVED", "plot_data": (plot_bytes, size, context)}}
         except Exception as e:
             return {"type": "ERROR", "data": str(e)}
 
     def worker_undo(self, node_id, file_path, project_path, redo_stack_list):
-        """Reverts file to previous hash, pushes current to Redo stack."""
         try:
             history = self.db.get_node_history(node_id)
-            if not history:
-                return {"type": "ERROR", "data": "NO HISTORY TO UNDO"}
-            
-            # The last item in history is the state *before* the current file state
+            if not history: return {"type": "ERROR", "data": "NO HISTORY TO UNDO"}
             target_hash = history[-1]
             vault_file = os.path.join(project_path, ".sci_vault", f"{target_hash}.csv")
-            
-            if not os.path.exists(vault_file):
-                return {"type": "ERROR", "data": "VERSION MISSING IN VAULT"}
-
-            # 1. Save CURRENT state to Vault for Redo
+            if not os.path.exists(vault_file): return {"type": "ERROR", "data": "VERSION MISSING IN VAULT"}
             current_hash = save_to_vault(file_path, project_path)
-            
-            # 2. Restore Old File
             shutil.copy2(vault_file, file_path)
-            
-            # 3. Update DB (Remove used history) and return data for Redo Stack
             self.db.remove_last_history_entry(node_id)
-            
-            return {
-                "type": "UNDO_COMPLETE",
-                "data": {
-                    "node_id": node_id,
-                    "redo_hash": current_hash,
-                    "restored_hash": target_hash
-                }
-            }
+            return {"type": "UNDO_COMPLETE", "data": {"node_id": node_id, "redo_hash": current_hash, "restored_hash": target_hash}}
         except Exception as e:
             return {"type": "ERROR", "data": str(e)}
 
     def worker_redo(self, node_id, file_path, project_path, redo_hash):
         try:
             vault_file = os.path.join(project_path, ".sci_vault", f"{redo_hash}.csv")
-            if not os.path.exists(vault_file):
-                 return {"type": "ERROR", "data": "REDO TARGET MISSING"}
-            
-            # 1. Save CURRENT state (which was the 'Undo' state) back to history
+            if not os.path.exists(vault_file): return {"type": "ERROR", "data": "REDO TARGET MISSING"}
             current_hash = save_to_vault(file_path, project_path)
-            if current_hash:
-                self.db.add_hash_to_history(node_id, current_hash)
-                
-            # 2. Restore the Redo file
+            if current_hash: self.db.add_hash_to_history(node_id, current_hash)
             shutil.copy2(vault_file, file_path)
-            
-            return {
-                "type": "REDO_COMPLETE",
-                "data": {"node_id": node_id, "restored_hash": redo_hash}
-            }
+            return {"type": "REDO_COMPLETE", "data": {"node_id": node_id, "restored_hash": redo_hash}}
         except Exception as e:
              return {"type": "ERROR", "data": str(e)}
 
@@ -285,11 +225,7 @@ class TaskQueue:
     def process_results(self):
         while not self.result_queue.empty():
             result = self.result_queue.get()
-            
-            if result.get("type") == "CANCELLED":
-                # Silently ignore cancelled tasks
-                continue
-
+            if result.get("type") == "CANCELLED": continue
             if result.get("type") == "ERROR":
                 state.status_msg = f"ERROR: {result['data']}"
                 state.is_processing = False
@@ -298,8 +234,6 @@ class TaskQueue:
 
             msg_type = result.get("type")
             data = result.get("data")
-
-            # Common reset for all success types
             state.is_processing = False
             state.processing_mode = "NORMAL"
 
@@ -311,6 +245,7 @@ class TaskQueue:
                 if 'analysis' in data: state.current_analysis = data['analysis']
                 if 'metadata' in data:
                     state.meta_input_notes = data['metadata'].get('notes', "") or ""
+                    state.notes_cursor_idx = len(state.meta_input_notes) # Reset cursor
                 if 'status' in data: state.status_msg = data['status']
 
             elif msg_type == "NEW_FILE_COMPLETE":
@@ -323,23 +258,28 @@ class TaskQueue:
                 state.needs_tree_update = True
                 state.status_msg = data['status']
 
+            elif msg_type == "INCONSISTENCY_CHECK_COMPLETE":
+                state.inconsistency_data = data
+                state.inconsistent_nodes = data.get("inconsistent_node_ids", [])
+                state.ai_popup_data = data
+                state.show_ai_popup = True
+                state.status_msg = "INCONSISTENCIES FOUND" if state.inconsistent_nodes else "TREE HEALTHY"
+
             elif msg_type == "CONVERSION_NEEDED":
                 state.pending_conversion = data
                 state.show_conversion_dialog = True
 
             elif msg_type == "ANALYSIS_READY":
-                # --- FIXED: Only update popup data, do NOT overwrite sidebar state ---
                 state.ai_popup_data = data
                 state.show_ai_popup = True
-                state.ai_popup_scroll_y = 0   # Reset Scroll
+                state.ai_popup_scroll_y = 0
                 state.status_msg = "ANALYSIS COMPLETE"
             
             elif msg_type == "EXPORT_COMPLETE":
                 state.status_msg = data
 
             elif msg_type == "SAVE_COMPLETE":
-                if 'node_id' in data:
-                    state.redo_stack[data['node_id']] = [] 
+                if 'node_id' in data: state.redo_stack[data['node_id']] = [] 
                 state.status_msg = "VERSION SAVED."
                 if 'plot_data' in data and data['plot_data'][0]:
                     raw, size, ctx = data['plot_data']

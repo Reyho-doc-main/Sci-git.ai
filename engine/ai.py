@@ -1,3 +1,4 @@
+# --- FILE: engine/ai.py ---
 import os
 import json
 import pandas as pd
@@ -23,19 +24,24 @@ class ExperimentSchema(BaseModel):
             return " ".join(str(x) for x in v)
         return str(v) if v is not None else ""
 
+class InconsistencyReport(BaseModel):
+    summary: str
+    inconsistent_node_ids: List[int]
+    anomalies: List[str]
+    next_steps: str
+
 class ScienceAI:
     def __init__(self):
-        self.api_key = os.getenv("AZURE_OPENAI_API_KEY")
-        self.endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        self.api_key = os.getenv("AZURE_OPENAI_API_KEY", "")
+        self.endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "")
         self.api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
-        
-        # Default fallback
         self.default_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-5-nano")
         
-        if not self.api_key: print("DEBUG: AI Key Missing")
-        if not self.endpoint: print("DEBUG: AI Endpoint Missing")
-
         self.client = None
+        self._init_client()
+
+    def _init_client(self):
+        """Internal method to initialize client from current attributes."""
         if self.api_key and self.endpoint:
             try:
                 self.client = AzureOpenAI(
@@ -43,12 +49,21 @@ class ScienceAI:
                     api_version=self.api_version,
                     azure_endpoint=self.endpoint
                 )
+                print("AI Client Initialized.")
             except Exception as e:
                 print(f"AI Connection Failed: {e}")
                 self.client = None
+        else:
+            self.client = None
+
+    def configure_client(self, key, endpoint):
+        """Allows runtime configuration of credentials."""
+        self.api_key = key
+        self.endpoint = endpoint
+        self._init_client()
+        return self.client is not None
 
     def get_placeholder_analysis(self, csv_path: str) -> ExperimentSchema:
-        """Fast, local analysis for immediate UI feedback without AI lag."""
         try:
             df = pd.read_csv(csv_path)
             cols = len(df.columns)
@@ -66,25 +81,31 @@ class ScienceAI:
         )
 
     def analyze_csv_data(self, csv_path: str, model: str = "gpt-5-mini") -> ExperimentSchema:
-        df = pd.read_csv(csv_path)
+        try:
+            df = pd.read_csv(csv_path)
+        except Exception:
+            return ExperimentSchema(summary="Error reading file.", anomalies=["FILE_ERROR"], next_steps="Check file format.", is_reproducible=False, ai_generated=False)
+
         if df.empty or len(df.columns) < 2 or len(df) < 3:
             return ExperimentSchema(
                 summary="Insufficient data for analysis.",
                 anomalies=["INSUFFICIENT_DATA"],
                 next_steps="Upload a more comprehensive dataset.",
-                is_reproducible=False
+                is_reproducible=False,
+                ai_generated=False
             )
         
         if state.stop_ai_requested:
             state.stop_ai_requested = False
             return self._local_analysis(df)
         
+        # --- FALLBACK LOGIC RESTORED ---
         if self.client:
             try:
                 csv_snippet = df.head(15).to_csv()
                 prompt = f"Analyze this experimental data and return JSON:\n{csv_snippet}"
                 response = self.client.chat.completions.create(
-                    model=model, # Use Mini for single files
+                    model=model,
                     messages=[
                         {"role": "system", "content": "You are a scientific data analyzer. Return strictly valid JSON with keys: summary, anomalies (list of strings), next_steps (single string), is_reproducible (bool)."},
                         {"role": "user", "content": prompt}
@@ -95,9 +116,42 @@ class ScienceAI:
                 data["ai_generated"] = True
                 return ExperimentSchema(**data)
             except Exception as e:
-                print(f"AI Error: {e}")
+                print(f"AI Error (Falling back to local): {e}")
+                # Fall through to local analysis
         
         return self._local_analysis(df)
+
+    def find_inconsistencies(self, tree_data_text: str) -> InconsistencyReport:
+        if not self.client:
+            return InconsistencyReport(
+                summary="AI Offline. Please configure API Key in settings or dropdown.",
+                inconsistent_node_ids=[],
+                anomalies=["AI_OFFLINE"],
+                next_steps="Click AI -> Analyze to configure credentials."
+            )
+            
+        try:
+            prompt = (
+                f"Analyze this experiment tree history for logical inconsistencies:\n{tree_data_text}\n"
+                "Return JSON: {summary, inconsistent_node_ids: [int], anomalies: [str], next_steps: str}"
+            )
+            response = self.client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[
+                    {"role": "system", "content": "You are a research auditor. Find logic gaps."},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"}
+            )
+            data = json.loads(response.choices[0].message.content)
+            return InconsistencyReport(**data)
+        except Exception as e:
+            return InconsistencyReport(
+                summary=f"Error: {e}",
+                inconsistent_node_ids=[],
+                anomalies=["API_ERROR"],
+                next_steps="Retry later."
+            )
 
     def compare_experiments(self, df1: pd.DataFrame, df2: pd.DataFrame) -> dict:
         numeric_cols = df1.select_dtypes(include=['number']).columns.intersection(df2.select_dtypes(include=['number']).columns)
@@ -110,7 +164,7 @@ class ScienceAI:
             try:
                 prompt = f"Compare Parent (A) vs Child (B) stats:\nA: {stats1}\nB: {stats2}\nIdentify drift. Return JSON: {{summary, anomalies}}."
                 response = self.client.chat.completions.create(
-                    model="gpt-5-mini", # Use Mini for comparison too
+                    model="gpt-5-mini",
                     messages=[{"role": "system", "content": "Concise delta analysis."}, {"role": "user", "content": prompt}],
                     response_format={"type": "json_object"}
                 )
@@ -119,13 +173,11 @@ class ScienceAI:
         return self._local_comparison(df1, df2, numeric_cols)
 
     def analyze_branch_history(self, history_text: str) -> str:
-        """Generates a narrative change log for a branch using NANO."""
         if not self.client: return "AI OFFLINE: Cannot generate branch report."
-        
         try:
-            prompt = f"Here is the commit history of a scientific experiment branch:\n{history_text}\n\nWrite a concise 'Evolutionary Report' summarizing how the experiment changed over time."
+            prompt = f"Here is the commit history:\n{history_text}\n\nWrite a concise 'Evolutionary Report'."
             response = self.client.chat.completions.create(
-                model="gpt-5-nano", # Keep Nano for broad project analysis
+                model="gpt-5-nano",
                 messages=[{"role": "system", "content": "You are a research historian."}, {"role": "user", "content": prompt}]
             )
             return response.choices[0].message.content
@@ -133,14 +185,16 @@ class ScienceAI:
             return f"Error generating report: {e}"
 
     def _local_analysis(self, df):
+        """Fallback when AI is offline."""
         cols = df.select_dtypes(include=['number']).columns
+        row_count = len(df)
         return ExperimentSchema(
-            summary=f"Local Analysis: {len(cols)} numeric columns detected. AI unavailable.", 
+            summary=f"LOCAL MODE: Dataset contains {row_count} rows and {len(cols)} numeric columns. Basic statistical profiling available in plot view.", 
             anomalies=[], 
-            next_steps="Check AI connection or API Key.", 
+            next_steps="Connect Azure OpenAI to enable advanced insights.", 
             is_reproducible=True, 
             ai_generated=False
         )
 
     def _local_comparison(self, df1, df2, cols):
-        return {"summary": "AI Offline. Manual comparison required.", "anomalies": []}
+        return {"summary": "AI Offline. Visual comparison only.", "anomalies": []}
