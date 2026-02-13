@@ -21,7 +21,7 @@ class RenderEngine:
         try:
             if os.path.exists("image/logo.jpg"):
                 logo_raw = pygame.image.load("image/logo.jpg")
-                self.logo_img = pygame.transform.smoothscale(logo_raw, (400, 300))
+                self.logo_img = pygame.transform.smoothscale(logo_raw, (400, 260))
                 self.logo_img.set_colorkey(self.logo_img.get_at((0,0)))
             else:
                 self.logo_img = None
@@ -79,8 +79,27 @@ class RenderEngine:
         self.screen.fill(UITheme.BG_DARK)
         UITheme.draw_grid(self.screen)
         
-        if self.logo_img: 
-            self.screen.blit(self.logo_img, self.logo_img.get_rect(center=(SCREEN_CENTER_X, 200)))
+        # --- Logo panel container (smaller + higher) ---
+        panel_w, panel_h = 560, 260
+        panel = pygame.Rect(0, 0, panel_w, panel_h)
+        panel.center = (SCREEN_CENTER_X, 175)
+
+        # Use same blue tone as logo background
+        logo_blue = (17, 70, 150)  # tweak if needed
+        pygame.draw.rect(self.screen, logo_blue, panel, border_radius=12)
+        pygame.draw.rect(self.screen, UITheme.GRID_COLOR, panel, 1, border_radius=12)
+        UITheme.draw_bracket(self.screen, panel, UITheme.ACCENT_ORANGE)
+
+        # Optional tint to soften strong logo bg (safe, does NOT change image file)
+        tint = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        tint.fill((0, 0, 0, 30))  # try 20~40
+        self.screen.blit(tint, panel.topleft)
+
+        if self.logo_img:
+            old_clip = self.screen.get_clip()
+            self.screen.set_clip(panel)  # prevent overflow outside panel
+            self.screen.blit(self.logo_img, self.logo_img.get_rect(center=panel.center))
+            self.screen.set_clip(old_clip)
             
         msg1 = self.font_header.render("WELCOME TO THE LAB", True, UITheme.TEXT_OFF_WHITE)
         msg2 = self.font_bold.render("To begin, please upload your first experimental CSV file.", True, UITheme.TEXT_DIM)
