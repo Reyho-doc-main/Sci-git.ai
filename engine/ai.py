@@ -99,7 +99,6 @@ class ScienceAI:
             state.stop_ai_requested = False
             return self._local_analysis(df)
         
-        # --- FALLBACK LOGIC RESTORED ---
         if self.client:
             try:
                 csv_snippet = df.head(15).to_csv()
@@ -120,6 +119,38 @@ class ScienceAI:
                 # Fall through to local analysis
         
         return self._local_analysis(df)
+
+    def generate_simplified_summary(self, csv_path: str) -> ExperimentSchema:
+        """Generates a non-technical summary for general audiences."""
+        try:
+            df = pd.read_csv(csv_path)
+            csv_snippet = df.head(10).to_csv()
+        except Exception:
+            return ExperimentSchema(summary="Error reading file.", anomalies=[], next_steps="", is_reproducible=False, ai_generated=False)
+
+        if not self.client:
+            return ExperimentSchema(summary="AI Offline. Cannot generate simplified report.", anomalies=[], next_steps="", is_reproducible=False, ai_generated=False)
+
+        try:
+            prompt = (
+                f"Here is a snippet of scientific data:\n{csv_snippet}\n\n"
+                "Explain the significance of this experiment to a 5th grader or non-scientist. "
+                "Avoid jargon. Focus on what is being measured and why it might matter. "
+                "Return JSON: {summary, anomalies: [], next_steps: '', is_reproducible: true}"
+            )
+            response = self.client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[
+                    {"role": "system", "content": "You are a science communicator explaining complex data simply."},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"}
+            )
+            data = json.loads(response.choices[0].message.content)
+            data["ai_generated"] = True
+            return ExperimentSchema(**data)
+        except Exception as e:
+            return ExperimentSchema(summary=f"AI Error: {e}", anomalies=[], next_steps="", is_reproducible=False, ai_generated=False)
 
     def find_inconsistencies(self, tree_data_text: str) -> InconsistencyReport:
         if not self.client:

@@ -213,19 +213,10 @@ def perform_print_mapping():
     old_zoom = tree_ui.zoom_level
     
     # 4. Center tree on new surface
-    # We want min_x to be at padding_x
-    # pos * zoom + offset = screen_pos
-    # We want screen_pos = padding
-    # min_x * 1.0 + offset = padding
-    # offset = padding - min_x
     tree_ui.zoom_level = 1.0
     tree_ui.camera_offset = pygame.Vector2(padding - min_x, padding - min_y)
     
     # 5. Draw
-    # We need to temporarily override theme colors for printing? 
-    # For now, just draw as is, but maybe force light mode logic if we had it exposed.
-    # Since VersionTree uses UITheme, we can't easily swap colors without global state change.
-    # We will just draw it.
     tree_ui.draw(map_surf, (-1000, -1000)) # Mouse off-screen
     
     # 6. Restore Camera
@@ -269,6 +260,36 @@ def perform_move_project():
     except Exception as e:
         state.status_msg = f"MOVE FAILED: {e}"
         # Try to recover DB connection if move failed
+        load_database_safe(os.path.join(curr_path, "project_vault.db"))
+
+def perform_rename_project():
+    new_name = simpledialog.askstring("Rename Project", "Enter new project name:")
+    if not new_name: return
+
+    curr_path = state.selected_project_path
+    parent_dir = os.path.dirname(curr_path)
+    new_path = os.path.join(parent_dir, new_name)
+
+    if os.path.exists(new_path):
+        state.status_msg = "ERROR: NAME EXISTS"
+        return
+
+    try:
+        # Stop watcher and db
+        global watcher, db
+        if watcher: watcher.stop(); watcher.join(); watcher = None
+        if db: db.close(); db = None
+
+        os.rename(curr_path, new_path)
+        state.selected_project_path = new_path
+
+        # Re-init
+        load_database_safe(os.path.join(new_path, "project_vault.db"))
+        watcher = start_watcher(os.path.join(new_path, "data"), event_queue)
+        state.status_msg = "PROJECT RENAMED."
+    except Exception as e:
+        state.status_msg = f"RENAME FAILED: {e}"
+        # Try to recover
         load_database_safe(os.path.join(curr_path, "project_vault.db"))
 
 def perform_delete_project():
@@ -512,6 +533,10 @@ while running:
                             state.show_file_dropdown = False
                             perform_move_project()
                             continue
+                        if layout.dd_file_rename.check_hover(mouse_pos): # NEW
+                            state.show_file_dropdown = False
+                            perform_rename_project()
+                            continue
                         if layout.dd_file_delete.check_hover(mouse_pos):
                             state.show_file_dropdown = False
                             state.show_delete_confirm = True
@@ -520,7 +545,7 @@ while running:
                             state.show_file_dropdown = False
                             perform_print_mapping()
                             continue
-                        if not pygame.Rect(20, 66, 140, 108).collidepoint(mouse_pos): state.show_file_dropdown = False
+                        if not pygame.Rect(20, 66, 140, 134).collidepoint(mouse_pos): state.show_file_dropdown = False
 
                     if layout.btn_menu_edit.check_hover(mouse_pos):
                         state.show_edit_dropdown = not state.show_edit_dropdown
@@ -579,6 +604,19 @@ while running:
                                 state.status_msg = "NO ANALYSIS AVAILABLE"
                             continue
                         
+                        if layout.dd_ai_simplified.check_hover(mouse_pos): # NEW
+                            state.show_ai_dropdown = False
+                            if not ai_engine.client:
+                                state.show_api_popup = True
+                                continue
+                            if len(state.selected_ids) == 1:
+                                state.processing_mode = "AI"
+                                state.status_msg = "GENERATING SIMPLIFIED REPORT..."
+                                task_manager.add_task(worker_ctrl.worker_generate_simplified_summary, [state.selected_ids[0]])
+                            else:
+                                state.status_msg = "SELECT 1 FILE FOR REPORT"
+                            continue
+
                         if layout.dd_ai_inconsistency.check_hover(mouse_pos):
                             state.show_ai_dropdown = False
                             if not ai_engine.client:
@@ -590,7 +628,7 @@ while running:
                             task_manager.add_task(worker_ctrl.worker_find_inconsistencies, [])
                             continue
 
-                        if not pygame.Rect(160, 66, 160, 78).collidepoint(mouse_pos): state.show_ai_dropdown = False
+                        if not pygame.Rect(160, 66, 160, 104).collidepoint(mouse_pos): state.show_ai_dropdown = False
 
                     if layout.btn_axis_gear.check_hover(mouse_pos): state.show_axis_selector = not state.show_axis_selector
                     
@@ -701,7 +739,8 @@ while running:
                 if state.show_ai_popup:
                     state.ai_popup_scroll_y = max(0, state.ai_popup_scroll_y - event.y * 30)
                     continue
-                if state.is_editing_metadata and pygame.Rect(840, 410, 420, 180).collidepoint(mouse_pos):
+                # Updated collision rect for the larger metadata editor
+                if state.is_editing_metadata and pygame.Rect(840, 350, 420, 280).collidepoint(mouse_pos):
                     state.notes_scroll_y = max(0, state.notes_scroll_y - event.y * 20)
                     continue
                 if mouse_pos[0] > 840: 

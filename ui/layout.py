@@ -20,14 +20,14 @@ class UILayout:
         
         # DASHBOARD - CONTEXT ICONS
         self.btn_add_manual = Button(0, 0, 32, 32, "+", UITheme.ACCENT_ORANGE) 
-        self.btn_edit_meta = Button(0, 0, 32, 32, "i", UITheme.NODE_MAIN)
+        self.btn_edit_meta = Button(0, 0, 32, 32, "D", UITheme.NODE_MAIN)
         self.btn_save_meta = Button(855, 600, 390, 30, "SAVE TO SNAPSHOT", (0, 150, 255))
         
         self.btn_conv_yes = Button(500, 400, 100, 40, "YES", (0, 180, 100))
         self.btn_conv_no = Button(680, 400, 100, 40, "NO", (200, 50, 50))
         
         # DASHBOARD - TOP RIGHT
-        self.btn_axis_gear = Button(1210, 100, 30, 30, "O", (80, 80, 90)) 
+        self.btn_axis_gear = Button(1210, 100, 30, 30, "", (80, 80, 90)) 
         self.btn_main_settings = Button(1230, 10, 30, 30, "*", (80, 80, 90))
 
         # HOME
@@ -47,8 +47,9 @@ class UILayout:
         # File Dropdown (Expanded)
         self.dd_file_export = Button(20, 68, 140, 24, "EXPORT PROJECT", UITheme.PANEL_GREY)
         self.dd_file_move = Button(20, 94, 140, 24, "MOVE PROJECT", UITheme.PANEL_GREY)
-        self.dd_file_delete = Button(20, 120, 140, 24, "DELETE PROJECT", UITheme.PANEL_GREY)
-        self.dd_file_print_map = Button(20, 146, 140, 24, "PRINT MAPPING", UITheme.PANEL_GREY)
+        self.dd_file_rename = Button(20, 120, 140, 24, "RENAME PROJECT", UITheme.PANEL_GREY) # NEW
+        self.dd_file_delete = Button(20, 146, 140, 24, "DELETE PROJECT", UITheme.PANEL_GREY)
+        self.dd_file_print_map = Button(20, 172, 140, 24, "PRINT MAPPING", UITheme.PANEL_GREY)
         
         # Edit Dropdown
         self.dd_edit_undo = Button(90, 68, 110, 24, "UNDO", UITheme.PANEL_GREY)
@@ -58,13 +59,14 @@ class UILayout:
         # AI Dropdown
         self.dd_ai_analyze = Button(160, 68, 160, 24, "ANALYZE PROJECT", UITheme.PANEL_GREY)
         self.dd_ai_summary = Button(160, 94, 160, 24, "AI NODE SUMMARY", UITheme.PANEL_GREY)
-        self.dd_ai_inconsistency = Button(160, 120, 160, 24, "FIND INCONSISTENCIES", UITheme.PANEL_GREY)
+        self.dd_ai_simplified = Button(160, 120, 160, 24, "SIMPLIFIED REPORT", UITheme.PANEL_GREY) # NEW
+        self.dd_ai_inconsistency = Button(160, 146, 160, 24, "FIND INCONSISTENCIES", UITheme.PANEL_GREY)
 
         for b in [
             self.btn_menu_file, self.btn_menu_edit, self.btn_menu_ai,
-            self.dd_file_export, self.dd_file_move, self.dd_file_delete, self.dd_file_print_map,
+            self.dd_file_export, self.dd_file_move, self.dd_file_rename, self.dd_file_delete, self.dd_file_print_map,
             self.dd_edit_undo, self.dd_edit_redo, self.dd_edit_file,
-            self.dd_ai_analyze, self.dd_ai_summary, self.dd_ai_inconsistency
+            self.dd_ai_analyze, self.dd_ai_summary, self.dd_ai_simplified, self.dd_ai_inconsistency
         ]:
             b.fill_color = "BG_DARK"
 
@@ -80,11 +82,10 @@ class UILayout:
         self.btn_popup_download = Button(SCREEN_CENTER_X + 10, 550, 200, 40, "DOWNLOAD PDF", UITheme.ACCENT_ORANGE)
 
         # --- CANVAS CONTROLS ---
-        # Canvas starts at x=20, y=80. Height 600. Bottom is 680.
-        # We place them at y=630 (inside canvas, bottom left corner)
+        # Changed "H" to "P" for Pan Mode
         self.btn_zoom_in = Button(30, 630, 30, 30, "+", UITheme.PANEL_GREY)
         self.btn_zoom_out = Button(70, 630, 30, 30, "-", UITheme.PANEL_GREY)
-        self.btn_pan_mode = Button(110, 630, 30, 30, "H", UITheme.PANEL_GREY) 
+        self.btn_pan_mode = Button(110, 630, 30, 30, "P", UITheme.PANEL_GREY) 
         
         # --- INCONSISTENCY ALERT ---
         self.btn_inconsistency_alert = Button(0, 0, 32, 32, "!", (255, 50, 50))

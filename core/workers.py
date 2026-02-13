@@ -116,7 +116,6 @@ class WorkerController:
         except Exception as e:
             return {"type": "ERROR", "data": str(e)}
 
-    # ... [Rest of file: worker_analyze_selection, worker_analyze_branch, etc. remain unchanged] ...
     def worker_analyze_selection(self, node_id):
         try:
             raw = self.db.get_experiment_by_id(node_id)
@@ -130,6 +129,24 @@ class WorkerController:
                 cursor = self.db.conn.cursor()
                 cursor.execute("UPDATE experiments SET analysis_json = ? WHERE id = ?", (json.dumps(analysis_data.model_dump()), node_id))
                 self.db.conn.commit()
+            return {"type": "ANALYSIS_READY", "data": analysis_data.model_dump()}
+        except Exception as e:
+            return {"type": "ERROR", "data": str(e)}
+
+    def worker_generate_simplified_summary(self, node_id):
+        try:
+            raw = self.db.get_experiment_by_id(node_id)
+            if not raw: return {"type": "ERROR", "data": "Node not found"}
+            file_path = raw[3]
+            if not os.path.exists(file_path): return {"type": "ERROR", "data": "File missing"}
+            
+            if state.stop_ai_requested: return {"type": "CANCELLED"}
+            
+            # Call the new AI method
+            analysis_data = self.ai_engine.generate_simplified_summary(file_path)
+            
+            if state.stop_ai_requested: return {"type": "CANCELLED"}
+            
             return {"type": "ANALYSIS_READY", "data": analysis_data.model_dump()}
         except Exception as e:
             return {"type": "ERROR", "data": str(e)}
