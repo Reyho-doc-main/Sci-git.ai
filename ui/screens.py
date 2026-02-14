@@ -32,9 +32,9 @@ class RenderEngine:
         self.icons['collapse'] = load_icon("image/collapse.webp", (20, 20))
         self.icons['expand'] = load_icon("image/expand.png", (20, 20))
         self.icons['settings'] = load_icon("image/setting_icon.webp", (30, 30))
-        self.icons['graph'] = load_icon("image/graph.png", (30, 30)) # NEW: Graph Icon
+        self.icons['graph'] = load_icon("image/graph.png", (30, 30))
 
-    # ... [draw_splash, draw_onboarding, draw_editor, draw_ai_loading, draw_ai_popup, draw_api_config_modal, draw_plot_tooltip remain unchanged] ...
+    # ... [draw_splash, draw_onboarding, draw_editor, draw_ai_loading, draw_ai_popup, draw_api_config_modal, draw_plot_tooltip, draw_metadata_editor, draw_delete_confirm_modal remain unchanged] ...
     
     def draw_splash(self, mouse_pos):
         self.screen.fill(UITheme.BG_LOGIN)
@@ -239,13 +239,11 @@ class RenderEngine:
             self.screen.blit(tt_surf, (tt_bg.x + 5, tt_bg.y + 3))
 
     def draw_metadata_editor(self, mouse_pos):
-        # FIXED: Moved panel higher and made it larger
         panel_rect = pygame.Rect(840, 350, 420, 280)
         pygame.draw.rect(self.screen, UITheme.PANEL_GREY, panel_rect)
         UITheme.draw_bracket(self.screen, panel_rect, UITheme.ACCENT_ORANGE)
         self.screen.blit(self.font_bold.render("EDITING NOTES (CTRL+C/V to Copy/Paste):", True, UITheme.TEXT_DIM), (860, 360))
         
-        # FIXED: Larger text area
         text_area_rect = pygame.Rect(850, 380, 400, 240)
         pygame.draw.rect(self.screen, UITheme.BG_DARK, text_area_rect)
         pygame.draw.rect(self.screen, UITheme.GRID_COLOR, text_area_rect, 1)
@@ -267,7 +265,6 @@ class RenderEngine:
         layout.btn_save_meta.draw(self.screen, self.font_bold)
 
     def draw_delete_confirm_modal(self, mouse_pos):
-        """Draws a scary red confirmation box for deletion."""
         overlay = pygame.Surface((1280, 720), pygame.SRCALPHA)
         overlay.fill((20, 0, 0, 230))
         self.screen.blit(overlay, (0,0))
@@ -309,7 +306,6 @@ class RenderEngine:
             pygame.draw.rect(self.screen, UITheme.GRID_COLOR, rect, 1)
 
         if state.show_file_dropdown:
-            # Expanded height for new items
             draw_dropdown_bg(pygame.Rect(20, 66, 140, 134)) 
             for b in [layout.dd_file_export, layout.dd_file_move, layout.dd_file_rename, layout.dd_file_delete, layout.dd_file_print_map]:
                 b.check_hover(mouse_pos)
@@ -322,8 +318,9 @@ class RenderEngine:
                 b.draw(self.screen, self.font_small)
 
         if state.show_ai_dropdown:
-            draw_dropdown_bg(pygame.Rect(160, 66, 160, 104))
-            for b in [layout.dd_ai_analyze, layout.dd_ai_summary, layout.dd_ai_simplified, layout.dd_ai_inconsistency]:
+            # Increased height for the new button
+            draw_dropdown_bg(pygame.Rect(160, 66, 180, 130))
+            for b in [layout.dd_ai_analyze, layout.dd_ai_summary, layout.dd_ai_node_simplified, layout.dd_ai_project_simplified, layout.dd_ai_inconsistency]:
                 b.check_hover(mouse_pos)
                 b.draw(self.screen, self.font_small)
 
@@ -395,13 +392,11 @@ class RenderEngine:
                 plot_rect = pygame.Rect(850, 100, 400, 300)
                 pygame.draw.rect(self.screen, (50, 50, 55), plot_rect, 1)
                 
-                # CHANGED: Use graph.png for axis gear button
                 layout.btn_axis_gear.check_hover(mouse_pos)
                 r = layout.btn_axis_gear.rect
                 if self.icons.get('graph'):
                     self.screen.blit(self.icons['graph'], (r.x, r.y))
                 else:
-                    # Fallback if image missing
                     layout.btn_axis_gear.draw(self.screen, self.font_bold)
                 
                 if layout.btn_axis_gear.is_hovered: pygame.draw.rect(self.screen, (255, 255, 255), r, 1)

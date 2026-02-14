@@ -121,7 +121,7 @@ class ScienceAI:
         return self._local_analysis(df)
 
     def generate_simplified_summary(self, csv_path: str) -> ExperimentSchema:
-        """Generates a non-technical summary for general audiences."""
+        """Generates a non-technical summary for a SINGLE NODE."""
         try:
             df = pd.read_csv(csv_path)
             csv_snippet = df.head(10).to_csv()
@@ -134,7 +134,7 @@ class ScienceAI:
         try:
             prompt = (
                 f"Here is a snippet of scientific data:\n{csv_snippet}\n\n"
-                "Explain the significance of this experiment to a 5th grader or non-scientist. "
+                "Explain the significance of this experiment to a 6th grader or non-scientist. "
                 "Avoid jargon. Focus on what is being measured and why it might matter. "
                 "Return JSON: {summary, anomalies: [], next_steps: '', is_reproducible: true}"
             )
@@ -142,6 +142,32 @@ class ScienceAI:
                 model="gpt-5-mini",
                 messages=[
                     {"role": "system", "content": "You are a science communicator explaining complex data simply."},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"}
+            )
+            data = json.loads(response.choices[0].message.content)
+            data["ai_generated"] = True
+            return ExperimentSchema(**data)
+        except Exception as e:
+            return ExperimentSchema(summary=f"AI Error: {e}", anomalies=[], next_steps="", is_reproducible=False, ai_generated=False)
+
+    def generate_project_simplified_summary(self, tree_data_text: str) -> ExperimentSchema:
+        """Generates a non-technical summary for the WHOLE PROJECT."""
+        if not self.client:
+            return ExperimentSchema(summary="AI Offline. Cannot generate project report.", anomalies=[], next_steps="", is_reproducible=False, ai_generated=False)
+
+        try:
+            prompt = (
+                f"Here is the history of a scientific project (list of file versions and branches):\n{tree_data_text}\n\n"
+                "Tell the 'story' of this research project to a non-scientist (6th grader level). "
+                "Explain how the project started, how it branched out, and what the overall goal (and impact) seems to be based on the file names and experiments done. "
+                "Return JSON: {summary, anomalies: [], next_steps: '', is_reproducible: true}"
+            )
+            response = self.client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[
+                    {"role": "system", "content": "You are a scientist explaining the history of a science project to some teens interested in what you do. Explain the goals clearly, and the significance of the work."},
                     {"role": "user", "content": prompt}
                 ],
                 response_format={"type": "json_object"}

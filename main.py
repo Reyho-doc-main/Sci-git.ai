@@ -533,7 +533,7 @@ while running:
                             state.show_file_dropdown = False
                             perform_move_project()
                             continue
-                        if layout.dd_file_rename.check_hover(mouse_pos): # NEW
+                        if layout.dd_file_rename.check_hover(mouse_pos):
                             state.show_file_dropdown = False
                             perform_rename_project()
                             continue
@@ -604,17 +604,30 @@ while running:
                                 state.status_msg = "NO ANALYSIS AVAILABLE"
                             continue
                         
-                        if layout.dd_ai_simplified.check_hover(mouse_pos): # NEW
+                        # --- NEW: SIMPLIFIED NODE REPORT ---
+                        if layout.dd_ai_node_simplified.check_hover(mouse_pos):
                             state.show_ai_dropdown = False
                             if not ai_engine.client:
                                 state.show_api_popup = True
                                 continue
                             if len(state.selected_ids) == 1:
                                 state.processing_mode = "AI"
-                                state.status_msg = "GENERATING SIMPLIFIED REPORT..."
-                                task_manager.add_task(worker_ctrl.worker_generate_simplified_summary, [state.selected_ids[0]])
+                                state.status_msg = "GENERATING NODE REPORT..."
+                                task_manager.add_task(worker_ctrl.worker_generate_node_simplified_summary, [state.selected_ids[0]])
                             else:
                                 state.status_msg = "SELECT 1 FILE FOR REPORT"
+                            continue
+
+                        # --- NEW: SIMPLIFIED PROJECT REPORT ---
+                        if layout.dd_ai_project_simplified.check_hover(mouse_pos):
+                            state.show_ai_dropdown = False
+                            if not ai_engine.client:
+                                state.show_api_popup = True
+                                continue
+                            
+                            state.processing_mode = "AI"
+                            state.status_msg = "GENERATING PROJECT STORY..."
+                            task_manager.add_task(worker_ctrl.worker_generate_project_simplified_summary, [])
                             continue
 
                         if layout.dd_ai_inconsistency.check_hover(mouse_pos):
@@ -628,7 +641,7 @@ while running:
                             task_manager.add_task(worker_ctrl.worker_find_inconsistencies, [])
                             continue
 
-                        if not pygame.Rect(160, 66, 160, 104).collidepoint(mouse_pos): state.show_ai_dropdown = False
+                        if not pygame.Rect(160, 66, 180, 130).collidepoint(mouse_pos): state.show_ai_dropdown = False
 
                     if layout.btn_axis_gear.check_hover(mouse_pos): state.show_axis_selector = not state.show_axis_selector
                     
@@ -739,7 +752,6 @@ while running:
                 if state.show_ai_popup:
                     state.ai_popup_scroll_y = max(0, state.ai_popup_scroll_y - event.y * 30)
                     continue
-                # Updated collision rect for the larger metadata editor
                 if state.is_editing_metadata and pygame.Rect(840, 350, 420, 280).collidepoint(mouse_pos):
                     state.notes_scroll_y = max(0, state.notes_scroll_y - event.y * 20)
                     continue

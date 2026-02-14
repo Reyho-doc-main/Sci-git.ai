@@ -133,7 +133,8 @@ class WorkerController:
         except Exception as e:
             return {"type": "ERROR", "data": str(e)}
 
-    def worker_generate_simplified_summary(self, node_id):
+    def worker_generate_node_simplified_summary(self, node_id):
+        """Worker for SINGLE NODE simplified report."""
         try:
             raw = self.db.get_experiment_by_id(node_id)
             if not raw: return {"type": "ERROR", "data": "Node not found"}
@@ -142,8 +143,23 @@ class WorkerController:
             
             if state.stop_ai_requested: return {"type": "CANCELLED"}
             
-            # Call the new AI method
             analysis_data = self.ai_engine.generate_simplified_summary(file_path)
+            
+            if state.stop_ai_requested: return {"type": "CANCELLED"}
+            
+            return {"type": "ANALYSIS_READY", "data": analysis_data.model_dump()}
+        except Exception as e:
+            return {"type": "ERROR", "data": str(e)}
+
+    def worker_generate_project_simplified_summary(self):
+        """Worker for WHOLE PROJECT simplified report."""
+        try:
+            tree_data = self.db.get_tree_data()
+            tree_text = "\n".join([f"ID:{r[0]}, Parent:{r[1]}, Branch:{r[2]}, Name:{r[3]}" for r in tree_data])
+            
+            if state.stop_ai_requested: return {"type": "CANCELLED"}
+            
+            analysis_data = self.ai_engine.generate_project_simplified_summary(tree_text)
             
             if state.stop_ai_requested: return {"type": "CANCELLED"}
             
