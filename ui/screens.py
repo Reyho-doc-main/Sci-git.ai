@@ -239,26 +239,26 @@ class RenderEngine:
             self.screen.blit(tt_surf, (tt_bg.x + 5, tt_bg.y + 3))
 
     def draw_metadata_editor(self, mouse_pos):
-        panel_rect = pygame.Rect(840, 350, 420, 280)
+        panel_rect = pygame.Rect(840, 80, 420, 550)
         pygame.draw.rect(self.screen, UITheme.PANEL_GREY, panel_rect)
         UITheme.draw_bracket(self.screen, panel_rect, UITheme.ACCENT_ORANGE)
-        self.screen.blit(self.font_bold.render("EDITING NOTES (CTRL+C/V to Copy/Paste):", True, UITheme.TEXT_DIM), (860, 360))
+        self.screen.blit(self.font_bold.render("EDITING NOTES (CTRL+C/V to Copy/Paste):", True, UITheme.TEXT_DIM), (860, 95))
         
-        text_area_rect = pygame.Rect(850, 380, 400, 240)
+        text_area_rect = pygame.Rect(850, 125, 400, 465)
         pygame.draw.rect(self.screen, UITheme.BG_DARK, text_area_rect)
         pygame.draw.rect(self.screen, UITheme.GRID_COLOR, text_area_rect, 1)
         
         self.screen.set_clip(text_area_rect)
         cursor_char = "|" if (pygame.time.get_ticks() // 500) % 2 == 0 else ""
         display_text = state.meta_input_notes[:state.notes_cursor_idx] + cursor_char + state.meta_input_notes[state.notes_cursor_idx:]
-        start_pos = (855, 385 - state.notes_scroll_y)
+        start_pos = (855, 130 - state.notes_scroll_y)
         total_h = UITheme.render_terminal_text(self.screen, display_text, start_pos, self.font_main, UITheme.TEXT_OFF_WHITE, 390)
         self.screen.set_clip(None)
         
-        if total_h > 240:
+        if total_h > 465:
             scroll_pct = state.notes_scroll_y / total_h
-            bar_h = (240 / total_h) * 240
-            bar_y = 380 + (scroll_pct * 240)
+            bar_h = (465 / total_h) * 465
+            bar_y = 125 + (scroll_pct * 465)
             pygame.draw.rect(self.screen, UITheme.ACCENT_ORANGE, (1245, bar_y, 4, bar_h))
         
         layout.btn_save_meta.check_hover(mouse_pos)

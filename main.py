@@ -752,7 +752,7 @@ while running:
                 if state.show_ai_popup:
                     state.ai_popup_scroll_y = max(0, state.ai_popup_scroll_y - event.y * 30)
                     continue
-                if state.is_editing_metadata and pygame.Rect(840, 350, 420, 280).collidepoint(mouse_pos):
+                if state.is_editing_metadata and pygame.Rect(840, 80, 420, 550).collidepoint(mouse_pos):
                     state.notes_scroll_y = max(0, state.notes_scroll_y - event.y * 20)
                     continue
                 if mouse_pos[0] > 840: 
