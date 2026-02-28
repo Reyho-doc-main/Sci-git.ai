@@ -287,12 +287,6 @@ class VersionTree:
                 break
         
         if clicked_node:
-            if clicked_node in state.inconsistent_nodes:
-                if state.inconsistency_data:
-                    state.ai_popup_data = state.inconsistency_data
-                    state.show_ai_popup = True
-                    return None 
-
             keys = pygame.key.get_pressed()
             is_ctrl = keys[pygame.K_LCTRL] or keys[pygame.K_RCTRL]
             if is_ctrl:
@@ -302,7 +296,7 @@ class VersionTree:
             else:
                 state.selected_ids = [clicked_node]
             self.dragged_node_id = clicked_node
-            return state.selected_ids
+            return list(state.selected_ids) 
         return None
 
     def update_drag(self, mouse_pos, panel_rect):

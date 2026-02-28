@@ -103,13 +103,13 @@ def create_seaborn_surface(df1, df2=None, width=400, height=300, x_col=None, y_c
                 # SIDE BY SIDE
                 context["overlay"] = False
                 ax1 = fig.add_subplot(211)
-                ax1.set_facecolor('#0d0d0f')
-                if len(cols1) >= 2:
+                ax1.set_facecolor(mpl_color(UITheme.BG_DARK)) # Fixed hardcoded hex
+                if len(cols1) >= 2 and not df1.empty:
                     sns.lineplot(data=df1, x=cols1[0], y=cols1[1], ax=ax1, color=line_colors[0])
                 
                 ax2 = fig.add_subplot(212)
-                ax2.set_facecolor('#0d0d0f')
-                if len(cols2) >= 2:
+                ax2.set_facecolor(mpl_color(UITheme.BG_DARK)) # Fixed hardcoded hex
+                if len(cols2) >= 2 and not df2.empty:
                     sns.lineplot(data=df2, x=cols2[0], y=cols2[1], ax=ax2, color=line_colors[1])
                 
                 fig.tight_layout()

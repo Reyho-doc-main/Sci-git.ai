@@ -284,6 +284,37 @@ class RenderEngine:
         layout.btn_del_cancel.check_hover(mouse_pos)
         layout.btn_del_cancel.draw(self.screen, self.font_bold)
 
+    def draw_conversion_dialog(self, mouse_pos):
+        overlay = pygame.Surface((1280, 720), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 200))
+        self.screen.blit(overlay, (0,0))
+        
+        w, h = 400, 200
+        x, y = (1280 - w)//2, (720 - h)//2
+        rect = pygame.Rect(x, y, w, h)
+        pygame.draw.rect(self.screen, UITheme.PANEL_GREY, rect)
+        pygame.draw.rect(self.screen, UITheme.ACCENT_ORANGE, rect, 2)
+        UITheme.draw_bracket(self.screen, rect, UITheme.ACCENT_ORANGE)
+        
+        self.screen.blit(self.font_header.render("UNIT MISMATCH", True, UITheme.ACCENT_ORANGE), (x + 20, y + 20))
+        
+        if state.pending_conversion:
+            file_path, col, unit = state.pending_conversion
+            msg = f"Convert '{col}' to {unit}?"
+        else:
+            msg = "Convert units to match?"
+            
+        self.screen.blit(self.font_main.render(msg, True, UITheme.TEXT_OFF_WHITE), (x + 20, y + 70))
+        
+        layout.btn_conv_yes.rect.topleft = (x + 50, y + 130)
+        layout.btn_conv_no.rect.topleft = (x + 250, y + 130)
+        
+        layout.btn_conv_yes.check_hover(mouse_pos)
+        layout.btn_conv_yes.draw(self.screen, self.font_bold)
+        
+        layout.btn_conv_no.check_hover(mouse_pos)
+        layout.btn_conv_no.draw(self.screen, self.font_bold)
+
     def draw_dashboard(self, mouse_pos, tree_ui, ai_engine, settings_menu):
         self.screen.fill(UITheme.BG_DARK)
         UITheme.draw_grid(self.screen)
