@@ -2,7 +2,7 @@
 class AppState:
     def __init__(self):
         # Core identifiers
-        self.selected_ids = [] 
+        self.selected_ids =[] 
         self.head_id = None
         self.active_branch = "main"
         
@@ -28,7 +28,7 @@ class AppState:
         self.show_ai_popup = False
         self.ai_popup_data = None
         
-        # --- NEW: API CONFIGURATION POPUP ---
+        # API CONFIGURATION POPUP
         self.show_api_popup = False
         self.api_key_buffer = ""
         self.api_endpoint_buffer = ""
@@ -37,13 +37,17 @@ class AppState:
         # Extended UI Toggles
         self.show_ai_panel = False          
         self.is_editing_metadata = False
-        self.show_delete_confirm = False # NEW: For Project Deletion
+        self.show_delete_confirm = False 
         
         # Dropdowns
         self.show_file_dropdown = False
         self.show_edit_dropdown = False
         self.show_ai_dropdown = False
         self.show_settings = False 
+        
+        # ADD POPUP & LINKAGE
+        self.show_add_popup = False
+        self.linkage_source = None
         
         # Editor State
         self.editor_df = None
@@ -62,7 +66,7 @@ class AppState:
         self.notes_cursor_idx = 0
         
         # Inconsistency State
-        self.inconsistent_nodes = []
+        self.inconsistent_nodes =[]
         self.inconsistency_data = None
         
         # App Flow

@@ -57,7 +57,7 @@ STATE_EDITOR = "EDITOR"
 current_state = STATE_SPLASH
 
 def init_project(path):
-    for folder in ["data", "exports", "logs", ".sci_vault"]: os.makedirs(os.path.join(path, folder), exist_ok=True)
+    for folder in["data", "exports", "logs", ".sci_vault"]: os.makedirs(os.path.join(path, folder), exist_ok=True)
     print(f"Project initialized at {path}. Hashing system active.")
 
 def load_database_safe(path):
@@ -95,7 +95,7 @@ def perform_undo():
     if not raw: return
     state.status_msg = "UNDOING..."
     state.processing_mode = "LOCAL"
-    task_manager.add_task(worker_ctrl.worker_undo, [node_id, raw[3], state.selected_project_path, state.redo_stack.get(node_id, [])])
+    task_manager.add_task(worker_ctrl.worker_undo,[node_id, raw[3], state.selected_project_path, state.redo_stack.get(node_id,[])])
 
 def perform_redo():
     if not state.selected_ids: return
@@ -108,7 +108,7 @@ def perform_redo():
     redo_hash = state.redo_stack[node_id].pop()
     state.status_msg = "REDOING..."
     state.processing_mode = "LOCAL"
-    task_manager.add_task(worker_ctrl.worker_redo, [node_id, raw[3], state.selected_project_path, redo_hash])
+    task_manager.add_task(worker_ctrl.worker_redo,[node_id, raw[3], state.selected_project_path, redo_hash])
 
 def open_editor_for_selected():
     global current_state
@@ -137,7 +137,7 @@ def reset_to_splash():
     try:
         while not event_queue.empty(): event_queue.get_nowait()
     except: pass
-    state.selected_ids = []
+    state.selected_ids =[]
     state.head_id = None
     state.active_branch = "main"
     state.current_plot = None
@@ -160,6 +160,8 @@ def reset_to_splash():
     state.show_ai_dropdown = False
     state.show_settings = False
     state.show_delete_confirm = False
+    state.show_add_popup = False
+    state.linkage_source = None
     state.editor_df = None
     state.editor_file_path = None
     state.editor_scroll_y = 0
@@ -177,14 +179,13 @@ def reset_to_splash():
     state.minimap_collapsed = False
     state.redo_stack = {}
     state.pan_mode = False 
-    tree_ui.nodes = []
-    tree_ui.connections = []
+    tree_ui.nodes =[]
+    tree_ui.connections =[]
     tree_ui.camera_offset = pygame.Vector2(60, 300)
     tree_ui.zoom_level = 1.0
     current_state = STATE_SPLASH
 
 def perform_print_mapping():
-    """Generates a PDF of the current version tree."""
     if not tree_ui.nodes:
         state.status_msg = "NO TREE TO PRINT"
         return
@@ -194,9 +195,8 @@ def perform_print_mapping():
 
     state.status_msg = "GENERATING MAP..."
     
-    # 1. Calculate Bounds
     all_x = [n["pos"].x for n in tree_ui.nodes]
-    all_y = [n["pos"].y for n in tree_ui.nodes]
+    all_y =[n["pos"].y for n in tree_ui.nodes]
     min_x, max_x = min(all_x), max(all_x)
     min_y, max_y = min(all_y), max(all_y)
     
@@ -204,26 +204,20 @@ def perform_print_mapping():
     w = int(max_x - min_x + (padding * 2))
     h = int(max_y - min_y + (padding * 2))
     
-    # 2. Create Surface
     map_surf = pygame.Surface((w, h))
-    map_surf.fill((255, 255, 255)) # White background for print
+    map_surf.fill((255, 255, 255)) 
     
-    # 3. Save old camera state
     old_offset = tree_ui.camera_offset
     old_zoom = tree_ui.zoom_level
     
-    # 4. Center tree on new surface
     tree_ui.zoom_level = 1.0
     tree_ui.camera_offset = pygame.Vector2(padding - min_x, padding - min_y)
     
-    # 5. Draw
-    tree_ui.draw(map_surf, (-1000, -1000)) # Mouse off-screen
+    tree_ui.draw(map_surf, (-1000, -1000)) 
     
-    # 6. Restore Camera
     tree_ui.camera_offset = old_offset
     tree_ui.zoom_level = old_zoom
     
-    # 7. Save Temp Image & PDF
     temp_img = "temp_tree_map.png"
     pygame.image.save(map_surf, temp_img)
     
@@ -237,7 +231,7 @@ def perform_move_project():
     if not new_dir: return
     
     curr_path = state.selected_project_path
-    dirname = os.path.basename(curr_path)
+    dirname = os.path.basename(os.path.normpath(curr_path))
     dest_path = os.path.join(new_dir, dirname)
     
     if os.path.exists(dest_path):
@@ -245,29 +239,28 @@ def perform_move_project():
         return
         
     try:
-        # Stop watcher and db
-        global watcher, db
+        global watcher, db, worker_ctrl
         if watcher: watcher.stop(); watcher.join(); watcher = None
         if db: db.close(); db = None
+        worker_ctrl = None
         
         shutil.move(curr_path, dest_path)
         state.selected_project_path = dest_path
         
-        # Re-init
         load_database_safe(os.path.join(dest_path, "project_vault.db"))
         watcher = start_watcher(os.path.join(dest_path, "data"), event_queue)
         state.status_msg = "PROJECT MOVED."
     except Exception as e:
         state.status_msg = f"MOVE FAILED: {e}"
-        # Try to recover DB connection if move failed
         load_database_safe(os.path.join(curr_path, "project_vault.db"))
+        watcher = start_watcher(os.path.join(curr_path, "data"), event_queue)
 
 def perform_rename_project():
     new_name = simpledialog.askstring("Rename Project", "Enter new project name:")
     if not new_name: return
 
     curr_path = state.selected_project_path
-    parent_dir = os.path.dirname(curr_path)
+    parent_dir = os.path.dirname(os.path.normpath(curr_path))
     new_path = os.path.join(parent_dir, new_name)
 
     if os.path.exists(new_path):
@@ -275,32 +268,27 @@ def perform_rename_project():
         return
 
     try:
-        # Stop watcher and db
-        global watcher, db
+        global watcher, db, worker_ctrl
         if watcher: watcher.stop(); watcher.join(); watcher = None
         if db: db.close(); db = None
+        worker_ctrl = None
 
         os.rename(curr_path, new_path)
         state.selected_project_path = new_path
 
-        # Re-init
         load_database_safe(os.path.join(new_path, "project_vault.db"))
         watcher = start_watcher(os.path.join(new_path, "data"), event_queue)
         state.status_msg = "PROJECT RENAMED."
     except Exception as e:
         state.status_msg = f"RENAME FAILED: {e}"
-        # Try to recover
         load_database_safe(os.path.join(curr_path, "project_vault.db"))
+        watcher = start_watcher(os.path.join(curr_path, "data"), event_queue)
 
 def perform_delete_project():
     try:
-        # Stop everything
-        global watcher, db
-        if watcher: watcher.stop(); watcher.join(); watcher = None
-        if db: db.close(); db = None
-        
-        shutil.rmtree(state.selected_project_path)
+        path_to_delete = state.selected_project_path
         reset_to_splash()
+        shutil.rmtree(path_to_delete)
         state.status_msg = "PROJECT DELETED."
     except Exception as e:
         state.status_msg = f"DELETE FAILED: {e}"
@@ -319,7 +307,7 @@ while running:
         if "VERSION SAVED" in state.status_msg or "RESTORED" in state.status_msg:
              if "RESTORED" in state.status_msg and state.selected_ids:
                  state.processing_mode = "LOCAL"
-                 task_manager.add_task(worker_ctrl.worker_load_experiment, [state.selected_ids])
+                 task_manager.add_task(worker_ctrl.worker_load_experiment,[state.selected_ids])
                  state.status_msg = "READY."
     
     if not event_queue.empty() and not state.is_processing and worker_ctrl:
@@ -343,7 +331,7 @@ while running:
                     continue 
 
         if current_state == STATE_EDITOR and event.type == pygame.KEYDOWN:
-            if event.key in [pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT]:
+            if event.key in[pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT]:
                 if state.editor_selected_cell:
                     r, c = state.editor_selected_cell
                     try: state.editor_df.iloc[r, c] = float(state.editor_input_buffer)
@@ -373,12 +361,10 @@ while running:
             keys = pygame.key.get_pressed()
             is_ctrl = keys[pygame.K_LCTRL] or keys[pygame.K_RCTRL]
             
-            # --- API CONFIG INPUT HANDLING ---
             if state.show_api_popup:
                 if event.key == pygame.K_TAB:
                     state.api_active_field = 1 if state.api_active_field == 0 else 0
                 elif event.key == pygame.K_RETURN:
-                    # Save and Close
                     success = ai_engine.configure_client(state.api_key_buffer, state.api_endpoint_buffer)
                     state.show_api_popup = False
                     state.status_msg = "AI CREDENTIALS UPDATED." if success else "AI CONFIG FAILED."
@@ -399,7 +385,6 @@ while running:
             elif is_ctrl and event.key == pygame.K_z and current_state == STATE_DASHBOARD: perform_undo()
             elif is_ctrl and event.key == pygame.K_y and current_state == STATE_DASHBOARD: perform_redo()
             
-            # --- NOTES EDITOR KEYBOARD HANDLING ---
             elif state.is_editing_metadata:
                 if is_ctrl and event.key == pygame.K_v:
                     try:
@@ -498,7 +483,7 @@ while running:
                     if layout.btn_conv_yes.check_hover(mouse_pos):
                         file_path, col, unit = state.pending_conversion
                         state.processing_mode = "LOCAL"
-                        task_manager.add_task(worker_ctrl.worker_perform_conversion, [file_path, col, unit, state.selected_ids])
+                        task_manager.add_task(worker_ctrl.worker_perform_conversion,[file_path, col, unit, state.selected_ids])
                         state.show_conversion_dialog = False
                     elif layout.btn_conv_no.check_hover(mouse_pos): state.show_conversion_dialog = False
 
@@ -527,7 +512,7 @@ while running:
                         if layout.dd_file_export.check_hover(mouse_pos):
                             state.show_file_dropdown = False
                             state.processing_mode = "LOCAL"
-                            task_manager.add_task(worker_ctrl.worker_export_project, [state.selected_project_path])
+                            task_manager.add_task(worker_ctrl.worker_export_project,[state.selected_project_path])
                             continue
                         if layout.dd_file_move.check_hover(mouse_pos):
                             state.show_file_dropdown = False
@@ -582,10 +567,10 @@ while running:
                             state.processing_mode = "AI"
                             if len(state.selected_ids) == 1:
                                 state.status_msg = "ANALYZING FILE (MINI)..."
-                                task_manager.add_task(worker_ctrl.worker_analyze_selection, [state.selected_ids[0]])
+                                task_manager.add_task(worker_ctrl.worker_analyze_selection,[state.selected_ids[0]])
                             else:
                                 state.status_msg = "ANALYZING BRANCH (NANO)..."
-                                task_manager.add_task(worker_ctrl.worker_analyze_branch, [state.active_branch])
+                                task_manager.add_task(worker_ctrl.worker_analyze_branch,[state.active_branch])
                             continue
                         
                         if layout.dd_ai_summary.check_hover(mouse_pos):
@@ -604,7 +589,6 @@ while running:
                                 state.status_msg = "NO ANALYSIS AVAILABLE"
                             continue
                         
-                        # --- NEW: SIMPLIFIED NODE REPORT ---
                         if layout.dd_ai_node_simplified.check_hover(mouse_pos):
                             state.show_ai_dropdown = False
                             if not ai_engine.client:
@@ -613,12 +597,11 @@ while running:
                             if len(state.selected_ids) == 1:
                                 state.processing_mode = "AI"
                                 state.status_msg = "GENERATING NODE REPORT..."
-                                task_manager.add_task(worker_ctrl.worker_generate_node_simplified_summary, [state.selected_ids[0]])
+                                task_manager.add_task(worker_ctrl.worker_generate_node_simplified_summary,[state.selected_ids[0]])
                             else:
                                 state.status_msg = "SELECT 1 FILE FOR REPORT"
                             continue
 
-                        # --- NEW: SIMPLIFIED PROJECT REPORT ---
                         if layout.dd_ai_project_simplified.check_hover(mouse_pos):
                             state.show_ai_dropdown = False
                             if not ai_engine.client:
@@ -627,7 +610,7 @@ while running:
                             
                             state.processing_mode = "AI"
                             state.status_msg = "GENERATING PROJECT STORY..."
-                            task_manager.add_task(worker_ctrl.worker_generate_project_simplified_summary, [])
+                            task_manager.add_task(worker_ctrl.worker_generate_project_simplified_summary,[])
                             continue
 
                         if layout.dd_ai_inconsistency.check_hover(mouse_pos):
@@ -638,7 +621,7 @@ while running:
 
                             state.processing_mode = "AI"
                             state.status_msg = "AUDITING TREE..."
-                            task_manager.add_task(worker_ctrl.worker_find_inconsistencies, [])
+                            task_manager.add_task(worker_ctrl.worker_find_inconsistencies,[])
                             continue
 
                         if not pygame.Rect(160, 66, 180, 130).collidepoint(mouse_pos): state.show_ai_dropdown = False
@@ -678,23 +661,58 @@ while running:
                             state.status_msg = "RETURNED TO MAIN"
                             
                     elif layout.btn_new_node.check_hover(mouse_pos):
-                        if not state.selected_ids:
-                            path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv")])
-                            if path:
-                                state.processing_mode = "LOCAL"
-                                task_manager.add_task(worker_ctrl.worker_process_new_file, [path, None, "main", state.researcher_name])
-                        else:
-                            path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv")])
-                            if path:
-                                state.processing_mode = "LOCAL"
-                                task_manager.add_task(worker_ctrl.worker_process_new_file, [path, state.selected_ids[0], state.active_branch, state.researcher_name])
+                        state.show_add_popup = not state.show_add_popup
+                        continue
 
-                    if not state.is_editing_metadata and not state.show_axis_selector:
+                    if state.show_add_popup:
+                        if layout.btn_add_popup_node.check_hover(mouse_pos):
+                            state.show_add_popup = False
+                            path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv")])
+                            if path:
+                                parent = state.selected_ids[0] if state.selected_ids else None
+                                state.processing_mode = "LOCAL"
+                                task_manager.add_task(worker_ctrl.worker_process_new_file,[path, parent, state.active_branch, state.researcher_name])
+                            continue
+                            
+                        if layout.btn_add_popup_image.check_hover(mouse_pos):
+                            state.show_add_popup = False
+                            path = filedialog.askopenfilename(filetypes=[("Image files", "*.png *.jpg *.jpeg *.gif"), ("All files", "*.*")])
+                            if path:
+                                state.status_msg = "IMAGE ADDED (PLACEHOLDER)"
+                            continue
+
+                        if layout.btn_add_popup_linkage.check_hover(mouse_pos):
+                            state.show_add_popup = False
+                            if state.selected_ids:
+                                state.linkage_source = state.selected_ids[0]
+                                state.status_msg = f"SELECT TARGET TO LINK FROM NODE {state.linkage_source}"
+                            else:
+                                state.status_msg = "SELECT A NODE FIRST TO LINK"
+                            continue
+
+                        if layout.btn_add_popup_more.check_hover(mouse_pos):
+                            state.show_add_popup = False
+                            continue
+                            
+                        if not pygame.Rect(850, 480, 180, 160).collidepoint(mouse_pos):
+                            state.show_add_popup = False
+
+                    if not state.is_editing_metadata and not state.show_axis_selector and not state.show_add_popup:
                         if not state.pan_mode:
                             selected_list = tree_ui.handle_click(event.pos, (20, 80, 800, 600))
                             if selected_list: 
-                                state.processing_mode = "LOCAL"
-                                task_manager.add_task(worker_ctrl.worker_load_experiment, [selected_list])
+                                if state.linkage_source:
+                                    target_id = selected_list[0]
+                                    if target_id != state.linkage_source:
+                                        db.add_linkage(state.linkage_source, target_id)
+                                        state.status_msg = f"LINKED NODE {state.linkage_source} TO NODE {target_id}"
+                                        state.needs_tree_update = True
+                                    else:
+                                        state.status_msg = "CANNOT LINK A NODE TO ITSELF"
+                                    state.linkage_source = None
+                                else:
+                                    state.processing_mode = "LOCAL"
+                                    task_manager.add_task(worker_ctrl.worker_load_experiment, [selected_list])
             
             elif current_state == STATE_SPLASH:
                 if not state.show_login_box:
@@ -733,7 +751,7 @@ while running:
                     path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv")])
                     if path:
                         state.processing_mode = "LOCAL"
-                        task_manager.add_task(worker_ctrl.worker_process_new_file, [path, None, "main", state.researcher_name])
+                        task_manager.add_task(worker_ctrl.worker_process_new_file,[path, None, "main", state.researcher_name])
                         current_state = STATE_DASHBOARD
                 elif layout.btn_skip_onboarding.check_hover(mouse_pos): current_state = STATE_DASHBOARD
 

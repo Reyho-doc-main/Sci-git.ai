@@ -34,13 +34,11 @@ class RenderEngine:
         self.icons['settings'] = load_icon("image/setting_icon.webp", (30, 30))
         self.icons['graph'] = load_icon("image/graph.png", (30, 30))
 
-    # ... [draw_splash, draw_onboarding, draw_editor, draw_ai_loading, draw_ai_popup, draw_api_config_modal, draw_plot_tooltip, draw_metadata_editor, draw_delete_confirm_modal remain unchanged] ...
-    
     def draw_splash(self, mouse_pos):
         self.screen.fill(UITheme.BG_LOGIN)
         if self.logo_img: self.screen.blit(self.logo_img, self.logo_img.get_rect(center=(SCREEN_CENTER_X, 230)))
         if not state.show_login_box:
-            for b in [layout.btn_new, layout.btn_load, layout.btn_import]:
+            for b in[layout.btn_new, layout.btn_load, layout.btn_import]:
                 b.check_hover(mouse_pos)
                 b.draw(self.screen, self.font_main)
         else:
@@ -78,7 +76,7 @@ class RenderEngine:
         msg2 = self.font_bold.render("To begin, please upload your first experimental CSV file.", True, UITheme.TEXT_DIM)
         self.screen.blit(msg1, (SCREEN_CENTER_X - msg1.get_width()//2, 320))
         self.screen.blit(msg2, (SCREEN_CENTER_X - msg2.get_width()//2, 370))
-        for b in [layout.btn_onboard_upload, layout.btn_skip_onboarding]:
+        for b in[layout.btn_onboard_upload, layout.btn_skip_onboarding]:
             b.check_hover(mouse_pos)
             b.draw(self.screen, self.font_main)
 
@@ -116,7 +114,7 @@ class RenderEngine:
                     display_val = state.editor_input_buffer if is_selected else str(val)
                     self.screen.blit(self.font_main.render(display_val[:12], True, (255, 255, 255)), (cx + 5, ry + 5))
                     if is_selected: pygame.draw.rect(self.screen, UITheme.ACCENT_ORANGE, rect, 2)
-        for b in [layout.btn_editor_save, layout.btn_editor_exit]:
+        for b in[layout.btn_editor_save, layout.btn_editor_exit]:
             b.check_hover(mouse_pos)
             b.draw(self.screen, self.font_bold)
 
@@ -165,7 +163,7 @@ class RenderEngine:
         self.screen.blit(self.font_bold.render("SUMMARY", True, UITheme.ACCENT_ORANGE), (inner_rect.x, y_cursor))
         y_cursor += 34
         y_cursor += UITheme.render_terminal_text(self.screen, summary, (text_x , y_cursor), self.font_main, UITheme.TEXT_OFF_WHITE, wrap_w) + 12
-        anomalies = data.get("anomalies", []) or []
+        anomalies = data.get("anomalies", []) or[]
         if anomalies:
             self.screen.blit(self.font_bold.render("DETECTED ANOMALIES", True, UITheme.ACCENT_ORANGE), (inner_rect.x, y_cursor))
             y_cursor += 34
@@ -295,7 +293,7 @@ class RenderEngine:
         header_txt = f"SCI-GIT // {proj_name} // {state.researcher_name.upper()}"
         self.screen.blit(self.font_bold.render(header_txt, True, UITheme.ACCENT_ORANGE), (20, 10))
         
-        for b in [layout.btn_menu_file, layout.btn_menu_edit, layout.btn_menu_ai]:
+        for b in[layout.btn_menu_file, layout.btn_menu_edit, layout.btn_menu_ai]:
             b.check_hover(mouse_pos)
             b.draw(self.screen, self.font_small)
         layout.btn_home.check_hover(mouse_pos)
@@ -307,20 +305,19 @@ class RenderEngine:
 
         if state.show_file_dropdown:
             draw_dropdown_bg(pygame.Rect(20, 66, 140, 134)) 
-            for b in [layout.dd_file_export, layout.dd_file_move, layout.dd_file_rename, layout.dd_file_delete, layout.dd_file_print_map]:
+            for b in[layout.dd_file_export, layout.dd_file_move, layout.dd_file_rename, layout.dd_file_delete, layout.dd_file_print_map]:
                 b.check_hover(mouse_pos)
                 b.draw(self.screen, self.font_small)
 
         if state.show_edit_dropdown:
             draw_dropdown_bg(pygame.Rect(90, 66, 110, 78))
-            for b in [layout.dd_edit_undo, layout.dd_edit_redo, layout.dd_edit_file]:
+            for b in[layout.dd_edit_undo, layout.dd_edit_redo, layout.dd_edit_file]:
                 b.check_hover(mouse_pos)
                 b.draw(self.screen, self.font_small)
 
         if state.show_ai_dropdown:
-            # Increased height for the new button
             draw_dropdown_bg(pygame.Rect(160, 66, 180, 130))
-            for b in [layout.dd_ai_analyze, layout.dd_ai_summary, layout.dd_ai_node_simplified, layout.dd_ai_project_simplified, layout.dd_ai_inconsistency]:
+            for b in[layout.dd_ai_analyze, layout.dd_ai_summary, layout.dd_ai_node_simplified, layout.dd_ai_project_simplified, layout.dd_ai_inconsistency]:
                 b.check_hover(mouse_pos)
                 b.draw(self.screen, self.font_small)
 
@@ -342,7 +339,7 @@ class RenderEngine:
 
         ai_status = "AI ONLINE" if ai_engine.client else "AI OFFLINE"
         ai_col = (0, 255, 150) if ai_engine.client else (200, 50, 50)
-        self.screen.blit(self.font_main.render(ai_status, True, ai_col), (1150, 10))
+        self.screen.blit(self.font_main.render(ai_status, True, ai_col), (1125, 10))
         self.screen.blit(self.font_main.render(f"> {state.status_msg}", True, UITheme.TEXT_DIM), (850, 15))
 
         tree_surf = pygame.Surface((800, 600), pygame.SRCALPHA)
@@ -357,8 +354,7 @@ class RenderEngine:
         self.screen.blit(tree_surf, (20, 80))
         UITheme.draw_bracket(self.screen, (20, 80, 800, 600), UITheme.ACCENT_ORANGE)
         
-        # Draw Canvas Controls (Bottom Left)
-        for b in [layout.btn_zoom_in, layout.btn_zoom_out, layout.btn_pan_mode]:
+        for b in[layout.btn_zoom_in, layout.btn_zoom_out, layout.btn_pan_mode]:
             b.check_hover(mouse_pos)
             b.draw(self.screen, self.font_bold)
             
@@ -422,6 +418,14 @@ class RenderEngine:
         for b in [layout.btn_new_node, layout.btn_branch]:
             b.check_hover(mouse_pos)
             b.draw(self.screen, self.font_main)
+            
+        if state.show_add_popup:
+            popup_rect = pygame.Rect(850, 480, 180, 160)
+            pygame.draw.rect(self.screen, UITheme.BG_DARK, popup_rect)
+            pygame.draw.rect(self.screen, UITheme.GRID_COLOR, popup_rect, 1)
+            for b in[layout.btn_add_popup_node, layout.btn_add_popup_image, layout.btn_add_popup_linkage, layout.btn_add_popup_more]:
+                b.check_hover(mouse_pos)
+                b.draw(self.screen, self.font_main)
         
         if state.is_processing:
             if state.processing_mode == "AI": self.draw_ai_loading(mouse_pos)
@@ -430,7 +434,6 @@ class RenderEngine:
         if state.show_conversion_dialog: self.draw_conversion_dialog(mouse_pos)
         if state.show_ai_popup: self.draw_ai_popup(mouse_pos)
         if state.show_delete_confirm: self.draw_delete_confirm_modal(mouse_pos)
-        
         if state.show_api_popup: self.draw_api_config_modal(mouse_pos)
         
         if state.show_settings:

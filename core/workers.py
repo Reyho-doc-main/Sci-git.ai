@@ -5,6 +5,7 @@ import json
 import pandas as pd
 import threading
 import shutil
+import tempfile
 from queue import Queue
 from state_manager import state
 from engine.analytics import create_seaborn_surface, HeaderScanner
@@ -192,8 +193,20 @@ class WorkerController:
         try:
             ts = pd.Timestamp.now().strftime("%Y%m%d_%H%M")
             zip_name = f"SciGit_Export_{ts}"
-            output_path = os.path.join(project_path, "exports", zip_name) 
-            shutil.make_archive(output_path, 'zip', project_path)
+            
+            # 1. Create the zip in the system's temporary directory to avoid recursive zipping
+            temp_dir = tempfile.gettempdir()
+            temp_zip_path = os.path.join(temp_dir, zip_name)
+            
+            shutil.make_archive(temp_zip_path, 'zip', project_path)
+            
+            # 2. Move the completed zip into the project's export folder
+            export_dir = os.path.join(project_path, "exports")
+            os.makedirs(export_dir, exist_ok=True)
+            final_zip_path = os.path.join(export_dir, f"{zip_name}.zip")
+            
+            shutil.move(f"{temp_zip_path}.zip", final_zip_path)
+            
             return {"type": "EXPORT_COMPLETE", "data": f"EXPORT: {zip_name}.zip"}
         except Exception as e:
             return {"type": "ERROR", "data": str(e)}

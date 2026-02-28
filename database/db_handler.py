@@ -1,3 +1,4 @@
+# --- FILE: database/db_handler.py ---
 import sqlite3
 import json
 import threading
@@ -45,9 +46,15 @@ class DBHandler:
                     self.conn.commit()
                 except sqlite3.Error:
                     pass
+                    
+            if "linked_nodes" not in columns:
+                try:
+                    self.conn.execute("ALTER TABLE experiments ADD COLUMN linked_nodes TEXT")
+                    self.conn.commit()
+                except sqlite3.Error:
+                    pass
 
     def get_id_by_path(self, path):
-        """Checks if a file is already processed."""
         with self.lock:
             cursor = self.conn.cursor()
             cursor.execute("SELECT id FROM experiments WHERE file_path = ?", (path,))
@@ -55,11 +62,8 @@ class DBHandler:
             return res[0] if res else None
 
     def add_experiment(self, name, file_path, analysis_dict, parent_id=None, branch="main"):
-        """Adds a new experiment record, avoiding duplicates."""
-        # Check existing first (lock handled inside get_id_by_path)
         existing_id = self.get_id_by_path(file_path)
-        if existing_id:
-            return existing_id
+        if existing_id: return existing_id
 
         query = """
         INSERT INTO experiments (timestamp, name, file_path, analysis_json, parent_id, branch_name)
@@ -79,47 +83,53 @@ class DBHandler:
                 self.conn.commit()
                 return cursor.lastrowid
             except sqlite3.IntegrityError:
-                # Fallback if race condition occurred
                 cursor.execute("SELECT id FROM experiments WHERE file_path = ?", (file_path,))
                 res = cursor.fetchone()
                 return res[0] if res else None
 
     def get_tree_data(self):
-        """Returns hierarchical experiment relationships."""
+        """Returns hierarchical experiment relationships and additional links."""
         with self.lock:
             cursor = self.conn.cursor()
-            cursor.execute("SELECT id, parent_id, branch_name, name FROM experiments ORDER BY id ASC")
+            cursor.execute("SELECT id, parent_id, branch_name, name, linked_nodes FROM experiments ORDER BY id ASC")
             return cursor.fetchall()
 
     def get_experiment_by_id(self, exp_id):
-        """Fetches full experiment record by ID."""
         with self.lock:
             cursor = self.conn.cursor()
             cursor.execute("SELECT * FROM experiments WHERE id = ?", (exp_id,))
             return cursor.fetchone()
 
     def update_metadata(self, exp_id, notes):
-        """Saves scientist's manual edits to notes."""
-        query = """
-        UPDATE experiments 
-        SET notes = ?
-        WHERE id = ?
-        """
+        query = "UPDATE experiments SET notes = ? WHERE id = ?"
         with self.lock:
             cursor = self.conn.cursor()
             cursor.execute(query, (notes, exp_id))
             self.conn.commit()
 
     def update_plot_settings(self, exp_id, x_col, y_col):
-        """Persists the user's axis selection for plotting."""
         settings = json.dumps({"x": x_col, "y": y_col})
         with self.lock:
             cursor = self.conn.cursor()
             cursor.execute("UPDATE experiments SET plot_settings = ? WHERE id = ?", (settings, exp_id))
             self.conn.commit()
+            
+    def add_linkage(self, source_id, target_id):
+        """Adds a custom visual linkage connection between nodes."""
+        with self.lock:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT linked_nodes FROM experiments WHERE id = ?", (source_id,))
+            res = cursor.fetchone()
+            links = []
+            if res and res[0]:
+                try: links = json.loads(res[0])
+                except: pass
+            if target_id not in links:
+                links.append(target_id)
+            cursor.execute("UPDATE experiments SET linked_nodes = ? WHERE id = ?", (json.dumps(links), source_id))
+            self.conn.commit()
 
     def close(self):
-        """Safely closes the database connection."""
         try:
             with self.lock:
                 self.conn.close()
@@ -128,7 +138,6 @@ class DBHandler:
 
     def add_hash_to_history(self, node_id, file_hash):
         with self.lock:
-            # Avoid duplicate consecutive hashes
             cursor = self.conn.cursor()
             cursor.execute("SELECT file_hash FROM node_history WHERE node_id = ? ORDER BY rowid DESC LIMIT 1", (node_id,))
             last = cursor.fetchone()
@@ -144,33 +153,22 @@ class DBHandler:
             return [r[0] for r in cursor.fetchall()]
             
     def remove_last_history_entry(self, node_id):
-        """Removes the most recent history entry (Used for Undo)."""
         with self.lock:
             cursor = self.conn.cursor()
-            # SQLite doesn't have a simple pop, so we use subquery on rowid
-            query = """
-            DELETE FROM node_history 
-            WHERE rowid = (
-                SELECT rowid FROM node_history 
-                WHERE node_id = ? 
-                ORDER BY rowid DESC LIMIT 1
-            )
-            """
+            query = "DELETE FROM node_history WHERE rowid = (SELECT rowid FROM node_history WHERE node_id = ? ORDER BY rowid DESC LIMIT 1)"
             cursor.execute(query, (node_id,))
             self.conn.commit()
+            
     def prune_missing_files(self):
-        """Remove experiments whose file_path no longer exists on disk."""
         with self.lock:
             cursor = self.conn.cursor()
             cursor.execute("SELECT id, file_path FROM experiments")
             rows = cursor.fetchall()
-
             removed = False
             for exp_id, file_path in rows:
                 if file_path and not os.path.exists(file_path):
                     cursor.execute("DELETE FROM experiments WHERE id = ?", (exp_id,))
                     removed = True
-
             if removed:
                 self.conn.commit()
             return removed

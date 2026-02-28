@@ -1,13 +1,15 @@
 # --- FILE: ui/elements.py ---
 import pygame
 import math
+import json
 from settings import UITheme
 from state_manager import state
 
 class VersionTree:
     def __init__(self):
         self.nodes = []  
-        self.connections = []
+        self.connections =[]
+        self.extra_links = {}
         self.node_radius = 18
         self.camera_offset = pygame.Vector2(60, 300)
         self.zoom_level = 1.0
@@ -49,13 +51,18 @@ class VersionTree:
     def update_tree(self, db_rows):
         old_offsets = {n["id"]: n.get("manual_offset", pygame.Vector2(0,0)) for n in self.nodes}
         self.nodes = []
-        self.connections = []
+        self.connections =[]
+        self.extra_links = {} # Reset extra links
         pos_map = {}
         branch_slots = {"main": 0}
         next_slot_y = 100 
 
         for row in db_rows:
-            node_id, parent_id, branch, name = row
+            node_id, parent_id, branch, name = row[0], row[1], row[2], row[3]
+            if len(row) > 4 and row[4]:
+                try: self.extra_links[node_id] = json.loads(row[4])
+                except: pass
+            
             gen_x = pos_map[parent_id]['gen'] + 1 if (parent_id and parent_id in pos_map) else 0
             if branch not in branch_slots:
                 branch_slots[branch] = len(branch_slots) * next_slot_y
@@ -75,30 +82,26 @@ class VersionTree:
             if parent_id in pos_map:
                 self.connections.append((pos_map[parent_id]['pos'], final_pos))
 
+        # Add custom linkages
+        for src, targets in self.extra_links.items():
+            if src in pos_map:
+                for tgt in targets:
+                    if tgt in pos_map:
+                        self.connections.append((pos_map[src]['pos'], pos_map[tgt]['pos']))
+
     def draw_arrow_head(self, surface, tip, direction, color):
-        """Draws a triangle arrow head at 'tip' pointing in 'direction'."""
         if direction.length() == 0: return
         direction = direction.normalize()
-        
-        # Arrow size
         size = 8
-        
-        # Calculate angle
         angle = math.atan2(direction.y, direction.x)
-        
-        # Points
         p1 = tip
         p2 = tip - pygame.Vector2(size, size/2).rotate_rad(angle)
         p3 = tip - pygame.Vector2(size, -size/2).rotate_rad(angle)
-        
         pygame.draw.polygon(surface, color, [p1, p2, p3])
 
     def draw_n8n_curve(self, surface, start, end, color):
-        """Draws a smooth Bezier curve with an arrow head at the end."""
         dist = (end.x - start.x) / 2
-        # Ensure minimum control distance for vertical connections
         if abs(dist) < 10: dist = 40
-        
         cp1 = start + pygame.Vector2(dist, 0)
         cp2 = end - pygame.Vector2(dist, 0)
         
@@ -109,16 +112,8 @@ class VersionTree:
             points.append(p)
         
         pygame.draw.lines(surface, color, False, points, 2)
-        
-        # --- RESTORED ARROW HEAD ---
-        # The tangent at t=1 for a cubic bezier is 3*(P3 - P2)
-        # P3 is end, P2 is cp2.
-        # So direction is end - cp2.
         direction = end - cp2
-        
-        # If points are identical, fallback
         if direction.length() == 0: direction = pygame.Vector2(1, 0)
-        
         self.draw_arrow_head(surface, end, direction, color)
 
     def draw(self, surface, mouse_pos):
@@ -126,19 +121,26 @@ class VersionTree:
         current_radius = int(self.node_radius * self.zoom_level)
         screen_w, screen_h = surface.get_size()
 
+        # FIXED: When dragging, we must rebuild BOTH parent connections AND extra links
         if self.dragged_node_id is not None:
-            self.connections = []
+            self.connections =[]
             pos_lookup = {n["id"]: n["pos"] for n in self.nodes}
+            
+            # Rebuild standard parent-child links
             for n in self.nodes:
                 if n["parent_id"] in pos_lookup:
                     self.connections.append((pos_lookup[n["parent_id"]], n["pos"]))
+                    
+            # Rebuild custom extra links
+            for src, targets in self.extra_links.items():
+                if src in pos_lookup:
+                    for tgt in targets:
+                        if tgt in pos_lookup:
+                            self.connections.append((pos_lookup[src], pos_lookup[tgt]))
 
-        # 1. Draw Connections (n8n Style + Arrows)
         for start, end in self.connections:
             s = (start * self.zoom_level) + self.camera_offset
             e = (end * self.zoom_level) + self.camera_offset
-            
-            # Port positions (Right of parent, Left of child)
             port_out = s + pygame.Vector2(current_radius, 0)
             port_in = e - pygame.Vector2(current_radius, 0)
 
@@ -146,12 +148,9 @@ class VersionTree:
             if max(s.y, e.y) < -50 or min(s.y, e.y) > screen_h + 50: continue
 
             self.draw_n8n_curve(surface, port_out, port_in, (100, 100, 110))
-            
-            # Draw Ports
             pygame.draw.circle(surface, (150, 150, 160), port_out, 3)
             pygame.draw.circle(surface, (150, 150, 160), port_in, 3)
 
-        # 2. Draw Nodes
         for node in self.nodes:
             draw_pos = (node["pos"] * self.zoom_level) + self.camera_offset
             ix, iy = int(draw_pos.x), int(draw_pos.y)
@@ -177,7 +176,6 @@ class VersionTree:
             pygame.draw.circle(surface, UITheme.PANEL_GREY, (ix, iy), current_radius)
             pygame.draw.circle(surface, base_color, (ix, iy), current_radius, 2)
             
-            # --- INCONSISTENCY BADGE ---
             if node["id"] in state.inconsistent_nodes:
                 badge_pos = (ix + current_radius - 5, iy - current_radius + 5)
                 pygame.draw.circle(surface, (255, 50, 50), badge_pos, 8)
@@ -193,7 +191,7 @@ class VersionTree:
                 name_txt = self.font.render(name_trunc, True, name_col)
                 surface.blit(name_txt, (ix - 30, iy + current_radius + 5))
 
-    # ... [draw_minimap, handle_click, update_drag remain unchanged] ...
+
     def draw_minimap(self, surface, panel_rect, icons=None):
         if not self.nodes: return
         map_w, map_h = 160, 120
@@ -224,7 +222,7 @@ class VersionTree:
         surface.blit(s, (dest_x, dest_y))
         pygame.draw.rect(surface, UITheme.ACCENT_ORANGE, self.minimap_rect, 1)
 
-        all_x = [n["pos"].x for n in self.nodes]
+        all_x =[n["pos"].x for n in self.nodes]
         all_y = [n["pos"].y for n in self.nodes]
         min_x, max_x = min(all_x), max(all_x)
         min_y, max_y = min(all_y), max(all_y)

@@ -7,7 +7,7 @@ from state_manager import state
 
 class AxisSelector:
     def __init__(self):
-        self.rect = pygame.Rect(0, 0, 220, 300)
+        self.rect = pygame.Rect(0, 0, 240, 300) # Made slightly wider for text
         self.font = pygame.font.SysFont("Consolas", 12)
         self.close_btn = Button(0, 0, 20, 20, "X", (200, 50, 50))
 
@@ -23,7 +23,11 @@ class AxisSelector:
         header_surf = self.font.render("PLOT CONFIGURATION", True, theme.ACCENT)
         surface.blit(header_surf, (x + 10, y + 10))
         
-        self.close_btn.rect.topleft = (x + 190, y + 5)
+        # Instructions
+        inst_surf = self.font.render("Hold 'X' + Click to set X-Axis", True, theme.TEXT_DIM)
+        surface.blit(inst_surf, (x + 10, y + 25))
+        
+        self.close_btn.rect.topleft = (x + 210, y + 5)
         self.close_btn.draw(surface, self.font)
 
         if not context or 'df' not in context:
@@ -33,10 +37,10 @@ class AxisSelector:
         numeric_cols = df.select_dtypes(include=['number']).columns
         
         # Column List
-        start_y = y + 40
+        start_y = y + 50 # Shifted down slightly to fit instructions
         for i, col in enumerate(numeric_cols):
             # Row Background
-            row_rect = pygame.Rect(x + 10, start_y + (i * 25), 200, 22)
+            row_rect = pygame.Rect(x + 10, start_y + (i * 25), 220, 22)
             is_hover = row_rect.collidepoint(pygame.mouse.get_pos())
             
             col_color = theme.BG_DARK if not is_hover else theme.GRID
@@ -48,14 +52,14 @@ class AxisSelector:
             
             # Indicators (X or Y)
             if col == context.get('x_col'):
-                pygame.draw.circle(surface, theme.ACCENT, (x + 190, row_rect.centery), 4)
+                pygame.draw.circle(surface, theme.ACCENT, (x + 210, row_rect.centery), 4)
                 lbl = self.font.render("X", True, theme.ACCENT)
-                surface.blit(lbl, (x + 175, row_rect.y + 4))
+                surface.blit(lbl, (x + 195, row_rect.y + 4))
             
             if col == context.get('y_col'):
-                pygame.draw.circle(surface, theme.ACCENT_SEC, (x + 190, row_rect.centery), 4)
+                pygame.draw.circle(surface, theme.ACCENT_SEC, (x + 210, row_rect.centery), 4)
                 lbl = self.font.render("Y", True, theme.ACCENT_SEC)
-                surface.blit(lbl, (x + 175, row_rect.y + 4))
+                surface.blit(lbl, (x + 195, row_rect.y + 4))
 
     def handle_click(self, mouse_pos, context, worker_ctrl, task_manager):
         if self.close_btn.rect.collidepoint(mouse_pos):
@@ -69,22 +73,24 @@ class AxisSelector:
         df = context['df']
         numeric_cols = df.select_dtypes(include=['number']).columns
         
-        local_y = mouse_pos[1] - (self.rect.y + 40)
+        local_y = mouse_pos[1] - (self.rect.y + 50)
         idx = local_y // 25
         
         if 0 <= idx < len(numeric_cols):
             col_name = numeric_cols[idx]
             
-            # Left Click = Set Y, Right Click = Set X
-            is_left_click = pygame.mouse.get_pressed()[0]
+            # Get current keyboard state
+            keys = pygame.key.get_pressed()
             
             new_x = context.get('x_col')
             new_y = context.get('y_col')
             
-            if is_left_click:
-                new_y = col_name
-            else:
+            # If user is holding 'X' while clicking
+            if keys[pygame.K_x]:
                 new_x = col_name
+            # If user is holding 'Y' while clicking (or just clicking normally)
+            else:
+                new_y = col_name
 
             state.processing_mode = "LOCAL"
             task_manager.add_task(worker_ctrl.worker_load_experiment, 
@@ -98,9 +104,7 @@ class SettingsMenu:
         self.btn_theme_light = Button(0, 0, 150, 40, "SCIENTIFIC LIGHT", (200, 200, 200))
         self.btn_theme_dark = Button(0, 0, 150, 40, "INDUSTRIAL DARK", (50, 50, 50))
         
-        # NEW: Clear Cache Button
         self.btn_clear_cache = Button(0, 0, 360, 40, "CLEAR PYCACHE", (200, 50, 50))
-        
         self.btn_close = Button(0, 0, 360, 40, "SAVE & CLOSE", theme.ACCENT)
 
     def draw(self, surface):

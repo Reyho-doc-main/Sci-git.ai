@@ -14,9 +14,17 @@ class UILayout:
         self.btn_import = Button(BTN_X, 540, BTN_WIDTH, 45, "UPLOAD PROJECT", UITheme.ACCENT_ORANGE)
         self.btn_confirm = Button(BTN_X, 520, BTN_WIDTH, 45, "ENTER LABORATORY", (0, 180, 100))
         
-        # DASHBOARD - BOTTOM BAR
-        self.btn_new_node = Button(850, 640, 180, 40, "NEW NODE", UITheme.ACCENT_ORANGE)
+        # DASHBOARD - BOTTOM BAR (Updated)
+        self.btn_new_node = Button(850, 640, 180, 40, "ADD", UITheme.ACCENT_ORANGE)
         self.btn_branch = Button(1050, 640, 180, 40, "NEW BRANCH", UITheme.NODE_BRANCH)
+
+        # --- ADD POPUP BUTTONS ---
+        self.btn_add_popup_node = Button(850, 480, 180, 40, "ADD NODE", UITheme.PANEL_GREY)
+        self.btn_add_popup_image = Button(850, 520, 180, 40, "ADD IMAGE", UITheme.PANEL_GREY)
+        self.btn_add_popup_linkage = Button(850, 560, 180, 40, "ADD LINKAGE", UITheme.PANEL_GREY)
+        self.btn_add_popup_more = Button(850, 600, 180, 40, "MORE", UITheme.PANEL_GREY)
+        for b in[self.btn_add_popup_node, self.btn_add_popup_image, self.btn_add_popup_linkage, self.btn_add_popup_more]:
+            b.fill_color = "BG_DARK"
         
         # DASHBOARD - CONTEXT ICONS
         self.btn_add_manual = Button(0, 0, 32, 32, "+", UITheme.ACCENT_ORANGE) 
@@ -56,14 +64,14 @@ class UILayout:
         self.dd_edit_redo = Button(90, 94, 110, 24, "REDO", UITheme.PANEL_GREY)
         self.dd_edit_file = Button(90, 120, 110, 24, "EDIT FILE", UITheme.PANEL_GREY)
         
-        # AI Dropdown (Updated)
+        # AI Dropdown
         self.dd_ai_analyze = Button(160, 68, 180, 24, "ANALYZE PROJECT", UITheme.PANEL_GREY)
         self.dd_ai_summary = Button(160, 94, 180, 24, "AI NODE SUMMARY", UITheme.PANEL_GREY)
-        self.dd_ai_node_simplified = Button(160, 120, 180, 24, "SIMPLIFIED NODE REPORT", UITheme.PANEL_GREY) # Renamed
-        self.dd_ai_project_simplified = Button(160, 146, 180, 24, "SIMPLIFIED PROJECT REPORT", UITheme.PANEL_GREY) # New
+        self.dd_ai_node_simplified = Button(160, 120, 180, 24, "SIMPLIFIED NODE REPORT", UITheme.PANEL_GREY)
+        self.dd_ai_project_simplified = Button(160, 146, 180, 24, "SIMPLIFIED PROJECT REPORT", UITheme.PANEL_GREY)
         self.dd_ai_inconsistency = Button(160, 172, 180, 24, "FIND INCONSISTENCIES", UITheme.PANEL_GREY)
 
-        for b in [
+        for b in[
             self.btn_menu_file, self.btn_menu_edit, self.btn_menu_ai,
             self.dd_file_export, self.dd_file_move, self.dd_file_rename, self.dd_file_delete, self.dd_file_print_map,
             self.dd_edit_undo, self.dd_edit_redo, self.dd_edit_file,
